@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "stella-ext.hiTimmy",
-        "title": "Hi Timmy"
+        "command": "stella-ext.startStella",
+        "title": "Start Stella"
       }
     ]
   },
