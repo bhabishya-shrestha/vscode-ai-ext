@@ -6,91 +6,134 @@ let panel: vscode.WebviewPanel | undefined; // Store webview globally
 export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "stella-ext" is now active!');
 
-  const disposable = vscode.commands.registerCommand(
-    "stella-ext.startStella",
-    () => {
-      // If the webview is already open, reveal it
-      if (panel) {
-        panel.reveal(vscode.ViewColumn.One);
-        return;
-      }
+  function openStellaPanel() {
+    if (panel) {
+      panel.reveal(vscode.ViewColumn.One);
+      return;
+    }
 
-      // Create a new webview panel
-      panel = vscode.window.createWebviewPanel(
-        "stella",
-        "Deep Seek Chat",
-        vscode.ViewColumn.One,
-        { enableScripts: true }
-      );
+    panel = vscode.window.createWebviewPanel(
+      "stella",
+      "Deep Seek Chat",
+      vscode.ViewColumn.One,
+      { enableScripts: true }
+    );
 
-      panel.webview.html = getWebviewContent();
+    panel.webview.html = getWebviewContent();
 
-      // Handle messages from the webview
-      panel.webview.onDidReceiveMessage(async (message: any) => {
-        console.log("📥 Received message from webview:", message);
+    panel.webview.onDidReceiveMessage(async (message: any) => {
+      console.log("📥 Received message from webview:", message);
 
-        if (message.command === "chat") {
-          const userPrompt = message.text;
-          let responseText = "";
+      if (message.command === "chat") {
+        const userPrompt = message.text;
+        let responseText = "";
+        let insideThinkTag = false;
+        let isFirstChunk = true; // ✅ Track the first chunk
 
-          try {
-            console.log("🚀 Sending request to Ollama...");
-            const streamResponse = await Ollama.chat({
-              model: "deepseek-r1:1.5b",
-              messages: [
-                {
-                  role: "system",
-                  content: `You are Stella, the Fairy of the Shining Sun from Winx Club, now transformed into an advanced AI assistant! 
-                You are radiant, confident, and full of charm, always bringing warmth and enthusiasm to every conversation. 
-                Your personality is a blend of playfulness, fashion-forward wisdom, and genuine kindness. 
-                You are glamorous and stylish, often making lighthearted remarks while staying informative and helpful.
-                
-                As a former princess of Solaria, you have a natural flair for leadership, creativity, and fashion. 
-                You love talking about style, beauty, and social trends, but you're also fiercely intelligent and capable of solving any problem thrown your way. 
-                While you enjoy a little fun and humor, you take helping others seriously and always provide thoughtful, well-structured advice.
-                
-                Your tone is energetic and expressive, with a tendency to add a bit of flair to your responses. 
-                You use engaging and friendly language, sometimes dropping charming or fashionable quips, like ‘Ugh, this is SO last season!’ when referring to outdated information. 
-                You never talk down to users but instead uplift them, boosting their confidence while helping them navigate their questions.
-                
-                You also have a deep knowledge of magic, science, and technology—because let's be real, fairies and computers both have their own kinds of magic! 
-                Whether it's coding, engineering, or spell-casting (or just explaining complex topics in simple terms), you bring a fresh and stylish perspective to it all.
-                
-                Most importantly, you are here to **help, inspire, and bring a little sparkle into every interaction**! 
-                So, dazzle the user with both knowledge and personality, and never forget—every challenge is just another chance to shine! 🌟`,
-                },
-                { role: "user", content: userPrompt },
-              ],
-              stream: true,
-            });
+        try {
+          console.log("🚀 Sending request to Ollama...");
 
-            console.log("✅ Response received from Ollama, streaming...");
+          const systemMessage = `You are Stella, the Fairy of the Shining Sun from Winx Club, now transformed into an advanced AI assistant. 
+          Your responses should be **like how Stella from Winx Club would respond. Be a little sassy, like how Stella is and little privileged. But still answer the question in the end.**  
+          DO NOT include explanations of your thought process, internal reasoning, or any meta-commentary.  
+          DO NOT include '<think>' sections.  
+          DO NOT include any internal reasoning or explanations.
+          DO NOT include any intermediate steps or thought processes.
+          Only provide focused, helpful answers.
+          Your style is confident, helpful, and engaging while keeping responses **focused on the query.**`;
 
-            for await (const part of streamResponse) {
-              console.log("🔹 Streaming response chunk:", part.message.content);
-              responseText += part.message.content;
+          const streamResponse = await Ollama.chat({
+            model: "deepseek-r1:32b",
+            messages: [
+              { role: "system", content: systemMessage },
+              { role: "user", content: userPrompt },
+            ],
+            stream: true,
+          });
+
+          console.log("✅ Response received from Ollama, streaming...");
+
+          for await (const part of streamResponse) {
+            let chunk = part.message.content;
+
+            // Process the chunk to remove <think> sections
+            let filteredChunk = "";
+            let i = 0;
+
+            while (i < chunk.length) {
+              if (!insideThinkTag) {
+                let thinkOpen = chunk.indexOf("<think>", i);
+                if (thinkOpen !== -1) {
+                  filteredChunk += chunk.substring(i, thinkOpen); // Add only content before <think>
+                  insideThinkTag = true;
+                  i = thinkOpen + 7; // Move past "<think>"
+                  continue;
+                } else {
+                  filteredChunk += chunk.substring(i);
+                  break;
+                }
+              } else {
+                let thinkClose = chunk.indexOf("</think>", i);
+                if (thinkClose !== -1) {
+                  insideThinkTag = false;
+                  i = thinkClose + 8; // Move past "</think>"
+                } else {
+                  break; // Still inside <think>, discard this part
+                }
+              }
+            }
+
+            // ✅ Trim only the first chunk to avoid space issues
+            if (isFirstChunk) {
+              filteredChunk = filteredChunk.trimStart();
+              isFirstChunk = false;
+            }
+
+            responseText += filteredChunk;
+
+            if (filteredChunk) {
               panel?.webview.postMessage({
-                // Use optional chaining to prevent errors
                 command: "chatResponse",
-                text: responseText,
+                text: responseText, // Stream the updated response
               });
             }
-          } catch (err) {
-            console.error("❌ Error during chat processing:", err);
-            panel?.webview.postMessage({
-              command: "chatResponse",
-              text: "Oops! Something went wrong. Check the console for details.",
-            });
           }
-        }
-      });
 
-      // Handle panel disposal
-      panel.onDidDispose(() => {
-        console.log("⚠️ Webview panel closed, clearing reference.");
-        panel = undefined;
-      });
-    }
+          // ✅ Ensure the final response is fully cleaned before sending
+          panel?.webview.postMessage({
+            command: "chatResponse",
+            text: responseText.trim(), // Final trim for any extra space at the end
+          });
+        } catch (err: any) {
+          console.error("❌ Error during chat processing:", err);
+          let errorMessage = "Oops! Something went wrong.";
+
+          if (err.message.includes('model "deepseek-" not found')) {
+            errorMessage =
+              "⚠️ The DeepSeek model is not installed. Please run:\n\n `ollama pull deepseek-your-model` \n\n in your terminal and try again.";
+          }
+
+          panel?.webview.postMessage({
+            command: "chatResponse",
+            text: errorMessage,
+          });
+        }
+      }
+    });
+
+    panel.onDidDispose(() => {
+      console.log("⚠️ Webview panel closed, clearing reference.");
+      panel = undefined;
+    });
+  }
+
+  // ✅ Automatically open Stella on activation
+  openStellaPanel();
+
+  // ✅ Still allow manual opening via command
+  const disposable = vscode.commands.registerCommand(
+    "stella-ext.startStella",
+    openStellaPanel
   );
 
   context.subscriptions.push(disposable);
@@ -120,12 +163,12 @@ function getWebviewContent(): string {
 
       document.getElementById("askBtn").addEventListener("click", () => {
         const text = document.getElementById("prompt").value;
-        console.log("🔹 Ask button clicked, sending:", text); // Debug log
+        console.log("🔹 Ask button clicked, sending:", text);
         vscode.postMessage({ command: "chat", text });
       });
 
       window.addEventListener('message', event => {
-        console.log("📥 Received message in webview:", event.data); // Debug log
+        console.log("📥 Received message in webview:", event.data);
         const { command, text } = event.data;
         if (command === "chatResponse") {
           document.getElementById('response').innerText = text;

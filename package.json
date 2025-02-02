@@ -1,7 +1,11 @@
 {
   "name": "stella-ext",
   "displayName": "stella-ext",
-  "description": "an ai powered vs-code assistant named stella",
+  "description": "an AI-powered VS Code assistant named Stella",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bhabishya-shrestha/vscode-ai-ext"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.96.0"
@@ -9,7 +13,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -17,7 +23,25 @@
         "command": "stella-ext.startStella",
         "title": "Start Stella"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "stella-sidebar",
+          "title": "Stella",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "stella-sidebar": [
+        {
+          "id": "stellaView",
+          "name": "Stella Chat",
+          "type": "webview"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
