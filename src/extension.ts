@@ -91,7 +91,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             if (filteredChunk) {
               this._view?.webview.postMessage({
                 command: "chatResponse",
-                text: responseText,
+                text: responseText, // Send the full response text each time
               });
             }
           }
@@ -139,52 +139,83 @@ function getWebviewContent(): string {
   <head>
     <meta charset="UTF-8">
     <style>
-      body { font-family: sans-serif; margin: 1rem; }
+      body { font-family: sans-serif; margin: 1rem; background: #1e1e1e; color: white; }
+      #chat-container { border: 1px solid #ccc; padding: 1rem; min-height: 300px; overflow-y: auto; max-height: 400px; display: flex; flex-direction: column; }
+      .message-container { display: flex; width: 100%; margin-bottom: 10px; }
+      .message { padding: 8px 12px; border-radius: 8px; max-width: 70%; word-wrap: break-word; }
+      
+      /* User messages (right, blue) */
+      .user-container { justify-content: flex-end; }
+      .user { background: #0078d7; color: white; }
+
+      /* AI messages (left, light pink) */
+      .ai-container { justify-content: flex-start; }
+      .ai { background: #ffdde1; color: black; }
+
       #prompt { width: 100%; box-sizing: border-box; padding: 8px; font-size: 16px; }
-      #response { border: 1px solid #ccc; margin-top: 1rem; padding: 0.5rem; min-height: 5rem; font-size: 16px; }
       #askBtn { margin-top: 10px; padding: 8px 16px; cursor: pointer; font-size: 16px; }
     </style>
   </head>
   <body>
     <h2> Stella Chat </h2>
+    <div id="chat-container"></div>
     <textarea id="prompt" rows="3" placeholder="Ask Stella something..."></textarea> <br />
     <button id="askBtn">Ask Stella</button>
-    <div id="response">Waiting for input...</div>
 
     <script>
       const vscode = acquireVsCodeApi();
+      const chatContainer = document.getElementById("chat-container");
       const promptInput = document.getElementById("prompt");
       const askButton = document.getElementById("askBtn");
+
+      function addMessage(text, sender) {
+        const container = document.createElement("div");
+        container.classList.add("message-container", sender + "-container");
+        
+        const messageDiv = document.createElement("div");
+        messageDiv.classList.add("message", sender);
+        messageDiv.innerText = text;
+
+        container.appendChild(messageDiv);
+        chatContainer.appendChild(container);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        return messageDiv;
+      }
 
       function sendMessage() {
         const text = promptInput.value.trim();
         if (text) {
+          addMessage(text, "user");
           vscode.postMessage({ command: "chat", text });
-          promptInput.value = ""; // Clear input after sending
+          promptInput.value = "";
+          currentAiBubble = null; // ✅ Reset AI bubble for new response
         }
       }
 
-      // Send message when clicking the button
       askButton.addEventListener("click", sendMessage);
 
-      // Handle Enter & Shift+Enter in the textarea
       promptInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          if (!event.shiftKey) {
-            event.preventDefault(); // Prevent new line
-            sendMessage();
-          }
-          // If Shift+Enter, let it create a new line (default behavior)
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendMessage();
         }
       });
 
-      window.addEventListener('message', event => {
+      let currentAiBubble = null;
+
+      window.addEventListener("message", event => {
         const { command, text } = event.data;
         if (command === "chatResponse") {
-          document.getElementById('response').innerText = text;
+          if (!currentAiBubble) {
+            currentAiBubble = addMessage(text, "ai"); // ✅ Create a new AI bubble with the full response text
+          } else {
+            currentAiBubble.innerText = text; // ✅ Update the existing AI bubble with the full response text
+          }
+          chatContainer.scrollTop = chatContainer.scrollHeight;
         }
       });
-    </script>
+  </script>
   </body>
   </html>
   `;
