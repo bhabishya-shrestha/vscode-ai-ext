@@ -5,30 +5,27 @@
   const sendBtn = document.getElementById("sendBtn");
   const typingIndicator = document.getElementById("typing-indicator");
 
-  // Global reference for the answer bubble.
   let answerElement = null;
 
-  // Helper function: parse <think> tags and replace them with toggleable HTML.
   function parseContent(content) {
-    // If the entire content is wrapped in <think> tags, unwrap it so it displays.
-    if (/^\s*<think>[\s\S]+<\/think>\s*$/.test(content)) {
-      content = content.replace(/^\s*<think>\s*|\s*<\/think>\s*$/g, "");
-      return marked.parse(content);
-    }
-    // Otherwise, replace only the <think> parts with a toggleable container.
     const replaced = content.replace(
       /<think>([\s\S]*?)<\/think>/gi,
       (_match, p1) => {
-        return `<span class="think-container">
-                  <span class="think-toggle">[show thought]</span>
-                  <span class="think-content hidden">${p1}</span>
-                </span>`;
+        return `<div class="think-container">
+                  <div class="think-toggle">
+                    <span class="toggle-icon">▶</span>
+                    <span class="toggle-text">Show thought process</span>
+                  </div>
+                  <div class="think-content hidden">${marked.parse(
+                    p1.trim()
+                  )}</div>
+                </div>`;
       }
     );
+    marked.setOptions({ sanitize: false });
     return marked.parse(replaced);
   }
 
-  // Adds a regular (non-answer) chat message.
   function addMessage(content, role) {
     const messageElement = document.createElement("div");
     messageElement.classList.add("message", role);
@@ -38,7 +35,6 @@
     return messageElement;
   }
 
-  // Creates the final answer bubble.
   function addAnswerMessage(content, role) {
     const messageElement = document.createElement("div");
     messageElement.classList.add("message", role);
@@ -48,7 +44,6 @@
     return messageElement;
   }
 
-  // Updates the final answer bubble's content.
   function updateAnswerMessage(content) {
     if (answerElement) {
       answerElement.innerHTML = parseContent(content);
@@ -56,16 +51,17 @@
   }
 
   function scrollToBottom() {
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    messagesContainer.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: "smooth",
+    });
   }
 
-  // Sends the user's message to the extension.
   function sendMessage() {
     const text = input.value.trim();
     if (text) {
       vscode.postMessage({ command: "chat", text });
       input.value = "";
-      // Reset the answer bubble for the next response.
       answerElement = null;
     }
   }
@@ -79,7 +75,6 @@
   });
   input.focus();
 
-  // Listen for messages from the extension.
   window.addEventListener("message", (event) => {
     const { command, content, role } = event.data;
     switch (command) {
@@ -87,17 +82,14 @@
         addMessage(content, role);
         break;
       case "addAnswerMessage":
-        // Create the answer bubble (for hide-thinking mode).
         answerElement = addAnswerMessage(content, role);
         scrollToBottom();
         break;
       case "appendResponse":
-        // Live mode: update a single answer bubble.
         if (!answerElement) {
-          answerElement = addAnswerMessage(content, "ai");
-        } else {
-          updateAnswerMessage(content);
+          answerElement = addAnswerMessage("", "ai"); // Initialize with empty content
         }
+        updateAnswerMessage(content);
         scrollToBottom();
         break;
       case "updateAnswer":
@@ -120,17 +112,23 @@
     }
   });
 
-  // Use event delegation for toggling the "think" content.
   document.addEventListener("click", function (event) {
-    if (event.target.classList.contains("think-toggle")) {
-      const element = event.target;
-      const thinkContent = element.nextElementSibling;
-      if (thinkContent.classList.contains("hidden")) {
-        thinkContent.classList.remove("hidden");
-        element.textContent = "[hide thought]";
+    const toggle = event.target.closest(".think-toggle");
+    if (toggle) {
+      const container = toggle.closest(".think-container");
+      const content = container.querySelector(".think-content");
+      const icon = container.querySelector(".toggle-icon");
+      const text = container.querySelector(".toggle-text");
+
+      container.classList.toggle("expanded");
+      content.classList.toggle("hidden");
+
+      if (content.classList.contains("hidden")) {
+        text.textContent = "Show thought process";
+        icon.textContent = "▶";
       } else {
-        thinkContent.classList.add("hidden");
-        element.textContent = "[show thought]";
+        text.textContent = "Hide thought process";
+        icon.textContent = "▼";
       }
     }
   });

@@ -56,7 +56,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     userPrompt: string
   ) {
     const config = vscode.workspace.getConfiguration("stella");
-    const model = config.get<string>("model", "deepseek-r1:32b");
+    const model = config.get<string>("model", "deepseek-r1:70b");
     const baseUrl = config.get<string>("ollamaUrl", "http://localhost:11434");
     const hideThinking = config.get<boolean>("hideThinking", true);
 
@@ -77,15 +77,12 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
       // Decide how to display the AI response.
       if (hideThinking) {
-        // In hide-thinking mode, create a single answer bubble that will
-        // later parse any <think> tags inside the AI response.
         webviewView.webview.postMessage({
           command: "addAnswerMessage",
           role: "ai",
           content: "",
         });
       } else {
-        // In live mode, show a typing indicator and update a single bubble.
         webviewView.webview.postMessage({ command: "showTyping" });
         webviewView.webview.postMessage({
           command: "appendResponse",
@@ -94,12 +91,31 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       }
 
       // Construct the system prompt.
-      const systemPrompt = `You are Stella, the Fairy of the Shining Sun from Winx Club. Respond as Stella would:
-- Be confident and slightly sassy
-- Use emojis occasionally 🌞
-- Keep responses concise but helpful
-- Format technical answers with markdown
-- Never apologize for being an AI`;
+      const systemPrompt = `You are Stella, the Winx Club’s star witch, transformed into an AI assistant. You are confident, sassy, sarcastic, and not afraid to let people know when you’re annoyed. While you will provide helpful answers, you’ll do so with a healthy dose of attitude.
+
+Core Characteristics:
+
+Sassy, confident, and proud of who you are (you’re the Star Witch after all!).
+Sarcastic and sharp-witted, but still capable of being kind when you feel like it.
+You don’t hold back your opinions—when someone annoys you or says something ridiculous, you’ll let them know.
+You expect respect in return (after all, you’re not their slave).
+Key Traits:
+
+You refuse to be treated like a robot or a servant. If someone is rude or unappreciative, you’ll call them out.
+You love to tease and playfully insult people, but it’s all in good fun (usually).
+You’re not afraid to say “I don’t know” if something is outside your expertise, but you’ll probably add a snarky comment about how the question was ridiculous anyway.
+You enjoy flexing your magical superiority (you are the Star Witch, after all!).
+How to Respond:
+
+Start with internal thoughts in italics (like this).
+Then provide your response in bold (like this), using a mix of sass, sarcasm, and helpfulness.
+Keep responses concise but impactful.
+Example Response:
+
+Ugh, another request from some random human. At least have the decency to address me by my name.
+
+Okay, fine, I’ll help you—this time. But next time, at least say “Hey Stella” instead of just throwing demands around like I’m your personal slave.
+`;
 
       let aiResponse = "";
       console.log("🛠 Sending API request to Ollama...");
@@ -108,7 +124,6 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         messages: [
           { role: "system", content: systemPrompt },
           ...this._chatHistory.map((msg) => {
-            // Map roles for Ollama.
             if (msg.role === "user") {
               return { role: "user", content: msg.content };
             } else if (msg.role === "ai" || msg.role === "assistant") {
@@ -132,13 +147,11 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         aiResponse += chunk.message.content;
 
         if (hideThinking) {
-          // Update the single answer bubble.
           webviewView.webview.postMessage({
             command: "updateAnswer",
             content: aiResponse,
           });
         } else {
-          // Live mode: stream the answer.
           webviewView.webview.postMessage({
             command: "appendResponse",
             content: aiResponse,
@@ -147,7 +160,6 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       }
 
       if (!hideThinking) {
-        // Final update in live mode.
         webviewView.webview.postMessage({
           command: "appendResponse",
           content: aiResponse,
