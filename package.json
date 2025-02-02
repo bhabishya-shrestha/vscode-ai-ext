@@ -61,8 +61,8 @@
         },
         "stella.hideThinking": {
           "type": "boolean",
-          "default": false,
-          "description": "Hide the thinking portion of the AI response."
+          "default": true,
+          "description": "When enabled, a separate thinking indicator is shown immediately above the final answer."
         }
       }
     }
