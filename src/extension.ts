@@ -1,34 +1,33 @@
 import * as vscode from "vscode";
 import Ollama from "ollama";
 
-let panel: vscode.WebviewPanel | undefined; // Store webview globally
+class StellaViewProvider implements vscode.WebviewViewProvider {
+  private _view?: vscode.WebviewView;
 
-export function activate(context: vscode.ExtensionContext) {
-  console.log('Congratulations, your extension "stella-ext" is now active!');
+  constructor(private readonly _extensionUri: vscode.Uri) {}
 
-  function openStellaPanel() {
-    if (panel) {
-      panel.reveal(vscode.ViewColumn.One);
-      return;
-    }
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    this._view = webviewView;
 
-    panel = vscode.window.createWebviewPanel(
-      "stella",
-      "Deep Seek Chat",
-      vscode.ViewColumn.One,
-      { enableScripts: true }
-    );
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
 
-    panel.webview.html = getWebviewContent();
+    webviewView.webview.html = getWebviewContent();
 
-    panel.webview.onDidReceiveMessage(async (message: any) => {
+    webviewView.webview.onDidReceiveMessage(async (message: any) => {
       console.log("📥 Received message from webview:", message);
 
       if (message.command === "chat") {
         const userPrompt = message.text;
         let responseText = "";
         let insideThinkTag = false;
-        let isFirstChunk = true; // ✅ Track the first chunk
+        let isFirstChunk = true;
 
         try {
           console.log("🚀 Sending request to Ollama...");
@@ -56,7 +55,6 @@ export function activate(context: vscode.ExtensionContext) {
           for await (const part of streamResponse) {
             let chunk = part.message.content;
 
-            // Process the chunk to remove <think> sections
             let filteredChunk = "";
             let i = 0;
 
@@ -64,9 +62,9 @@ export function activate(context: vscode.ExtensionContext) {
               if (!insideThinkTag) {
                 let thinkOpen = chunk.indexOf("<think>", i);
                 if (thinkOpen !== -1) {
-                  filteredChunk += chunk.substring(i, thinkOpen); // Add only content before <think>
+                  filteredChunk += chunk.substring(i, thinkOpen);
                   insideThinkTag = true;
-                  i = thinkOpen + 7; // Move past "<think>"
+                  i = thinkOpen + 7;
                   continue;
                 } else {
                   filteredChunk += chunk.substring(i);
@@ -76,14 +74,13 @@ export function activate(context: vscode.ExtensionContext) {
                 let thinkClose = chunk.indexOf("</think>", i);
                 if (thinkClose !== -1) {
                   insideThinkTag = false;
-                  i = thinkClose + 8; // Move past "</think>"
+                  i = thinkClose + 8;
                 } else {
-                  break; // Still inside <think>, discard this part
+                  break;
                 }
               }
             }
 
-            // ✅ Trim only the first chunk to avoid space issues
             if (isFirstChunk) {
               filteredChunk = filteredChunk.trimStart();
               isFirstChunk = false;
@@ -92,17 +89,16 @@ export function activate(context: vscode.ExtensionContext) {
             responseText += filteredChunk;
 
             if (filteredChunk) {
-              panel?.webview.postMessage({
+              this._view?.webview.postMessage({
                 command: "chatResponse",
-                text: responseText, // Stream the updated response
+                text: responseText,
               });
             }
           }
 
-          // ✅ Ensure the final response is fully cleaned before sending
-          panel?.webview.postMessage({
+          this._view?.webview.postMessage({
             command: "chatResponse",
-            text: responseText.trim(), // Final trim for any extra space at the end
+            text: responseText.trim(),
           });
         } catch (err: any) {
           console.error("❌ Error during chat processing:", err);
@@ -113,74 +109,83 @@ export function activate(context: vscode.ExtensionContext) {
               "⚠️ The DeepSeek model is not installed. Please run:\n\n `ollama pull deepseek-your-model` \n\n in your terminal and try again.";
           }
 
-          panel?.webview.postMessage({
+          this._view?.webview.postMessage({
             command: "chatResponse",
             text: errorMessage,
           });
         }
       }
     });
-
-    panel.onDidDispose(() => {
-      console.log("⚠️ Webview panel closed, clearing reference.");
-      panel = undefined;
-    });
   }
+}
 
-  // ✅ Automatically open Stella on activation
-  openStellaPanel();
+export function activate(context: vscode.ExtensionContext) {
+  console.log("Stella extension is now active!");
 
-  // ✅ Still allow manual opening via command
-  const disposable = vscode.commands.registerCommand(
-    "stella-ext.startStella",
-    openStellaPanel
+  const provider = new StellaViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider("stellaView", provider)
   );
+}
 
-  context.subscriptions.push(disposable);
+export function deactivate() {
+  console.log("Stella extension deactivated.");
 }
 
 function getWebviewContent(): string {
   return `
-  	<!DOCTYPE html>
-	<html lang="en">
-	<head>
-		<meta charset="UTF-8">
-		<style>
-			body { font-family: sans-serif; margin: 1rem; }
-			#prompt { width: 100%; box-sizing: border-box; padding: 8px; font-size: 16px; }
-			#response { border: 1px solid #ccc; margin-top: 1rem; padding: 0.5rem; min-height: 5rem; font-size: 16px; }
-			#askBtn { margin-top: 10px; padding: 8px 16px; cursor: pointer; font-size: 16px; }
-		</style>
-	</head>
-	<body>
-		<h2> Stella VS Code Extension </h2>
-		<textarea id="prompt" rows="3" placeholder="Politely ask Stella something, then hit enter"></textarea> <br />
-		<button id="askBtn">Ask Stella</button>
-		<div id="response"></div>
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body { font-family: sans-serif; margin: 1rem; }
+      #prompt { width: 100%; box-sizing: border-box; padding: 8px; font-size: 16px; }
+      #response { border: 1px solid #ccc; margin-top: 1rem; padding: 0.5rem; min-height: 5rem; font-size: 16px; }
+      #askBtn { margin-top: 10px; padding: 8px 16px; cursor: pointer; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <h2> Stella Chat </h2>
+    <textarea id="prompt" rows="3" placeholder="Ask Stella something..."></textarea> <br />
+    <button id="askBtn">Ask Stella</button>
+    <div id="response">Waiting for input...</div>
 
     <script>
       const vscode = acquireVsCodeApi();
+      const promptInput = document.getElementById("prompt");
+      const askButton = document.getElementById("askBtn");
 
-      document.getElementById("askBtn").addEventListener("click", () => {
-        const text = document.getElementById("prompt").value;
-        console.log("🔹 Ask button clicked, sending:", text);
-        vscode.postMessage({ command: "chat", text });
+      function sendMessage() {
+        const text = promptInput.value.trim();
+        if (text) {
+          vscode.postMessage({ command: "chat", text });
+          promptInput.value = ""; // Clear input after sending
+        }
+      }
+
+      // Send message when clicking the button
+      askButton.addEventListener("click", sendMessage);
+
+      // Handle Enter & Shift+Enter in the textarea
+      promptInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          if (!event.shiftKey) {
+            event.preventDefault(); // Prevent new line
+            sendMessage();
+          }
+          // If Shift+Enter, let it create a new line (default behavior)
+        }
       });
 
       window.addEventListener('message', event => {
-        console.log("📥 Received message in webview:", event.data);
         const { command, text } = event.data;
         if (command === "chatResponse") {
           document.getElementById('response').innerText = text;
         }
       });
     </script>
-    </body>
-	</html>
+  </body>
+  </html>
   `;
-}
-
-// This method is called when your extension is deactivated
-export function deactivate() {
-  console.log("Stella extension deactivated.");
 }
