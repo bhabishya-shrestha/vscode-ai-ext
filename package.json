@@ -22,6 +22,10 @@
       {
         "command": "stella-ext.startStella",
         "title": "Start Stella"
+      },
+      {
+        "command": "stella-ext.toggleHideThinking",
+        "title": "Toggle Hide Thinking Portion"
       }
     ],
     "viewsContainers": {
@@ -41,6 +45,26 @@
           "type": "webview"
         }
       ]
+    },
+    "configuration": {
+      "title": "Stella",
+      "properties": {
+        "stella.model": {
+          "type": "string",
+          "default": "deepseek-r1:32b",
+          "description": "Default Ollama model to use"
+        },
+        "stella.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama server URL"
+        },
+        "stella.hideThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide the thinking portion of the AI response."
+        }
+      }
     }
   },
   "scripts": {
