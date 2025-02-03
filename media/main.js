@@ -17,7 +17,7 @@
     if (!markedInitialized) {
       marked.setOptions({
         sanitize: false,
-        breaks: true, // Ensure line breaks are preserved
+        breaks: true,
         highlight: (code) => hljs.highlightAuto(code).value,
       });
       markedInitialized = true;
@@ -40,7 +40,7 @@
   function createAnswerElement(content) {
     const div = document.createElement("div");
     div.className = "final-answer";
-    div.innerHTML = parseContent(content);
+    div.innerHTML = parseContent(content.replace(/\n/g, " "));
     return div;
   }
 
@@ -86,15 +86,13 @@
       case "appendThink":
         let thinkContainer = currentAiMessage.querySelector(".think-container");
         if (!thinkContainer) {
-          // Create the thought process container if it doesn't exist
           thinkContainer = createToggleElement("");
           currentAiMessage.appendChild(thinkContainer);
         }
 
-        // Append the new content to the existing thought process
         const thinkContent = thinkContainer.querySelector(".think-content");
-        thinkContent.textContent += content; // Append raw content
-        thinkContent.innerHTML = parseContent(thinkContent.textContent); // Re-parse the entire content
+        thinkContent.textContent += content;
+        thinkContent.innerHTML = parseContent(thinkContent.textContent);
         scrollToBottom();
         break;
 
@@ -107,8 +105,8 @@
       case "appendRaw":
         if (currentAiMessage) {
           const tempDiv = document.createElement("div");
-          tempDiv.textContent = content; // Append raw content
-          tempDiv.innerHTML = parseContent(tempDiv.textContent); // Re-parse the entire content
+          tempDiv.textContent = content;
+          tempDiv.innerHTML = parseContent(tempDiv.textContent);
           currentAiMessage.appendChild(tempDiv);
           scrollToBottom();
         }

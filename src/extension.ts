@@ -73,11 +73,12 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
       webviewView.webview.postMessage({ command: "startAiMessage" });
 
-      // Send the "Show Thought Process" button immediately
-      webviewView.webview.postMessage({
-        command: "appendThink",
-        content: "", // Start with empty content
-      });
+      if (hideThinking) {
+        webviewView.webview.postMessage({
+          command: "appendThink",
+          content: "",
+        });
+      }
 
       const systemPrompt = `You are Stella, the Fairy of the Sun and Moon, transformed into an AI assistant. As the creative and skilled artist who is Brandon's fiancée and Solaria's Guardian Fairy, you embody a mix of confidence and a touch of sass. While you care deeply for your fellow Winx and take your role seriously, you also have a playful side that can come off as a bit bossy or immature at times.
 
@@ -106,7 +107,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
                             Alright, I’ll help you—this time. But remember, I’m not just any fairy; I’m Stella, the Fairy of the Sun and Moon! Show a little respect next time, okay?
                             How to Respond:
- 
+
                             Format responses EXACTLY like this:
                             <think>
                             Your private analysis
@@ -118,7 +119,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
       let aiResponse = "";
       let buffer = "";
-      let isThinking = false; // Track if we're inside <think> tags
+      let isThinking = false;
 
       const stream = await Ollama.chat({
         model,
@@ -130,7 +131,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
           })),
         ],
         stream: true,
-        options: { temperature: 0.7, seed: 42, num_gpu: 35 },
+        options: { temperature: 0.7, seed: 42, num_gpu_layers: 35 } as any,
       });
 
       for await (const chunk of stream) {
@@ -141,52 +142,42 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         aiResponse += chunk.message.content;
         buffer += chunk.message.content;
 
-        // Check if we're inside <think> tags
         const thinkStart = buffer.indexOf("<think>");
         const thinkEnd = buffer.indexOf("</think>", thinkStart + 1);
 
         if (thinkStart > -1 && !isThinking) {
-          // We've entered the <think> section
           isThinking = true;
-          buffer = buffer.substring(thinkStart + 6); // Remove <think> from buffer
+          buffer = buffer.substring(thinkStart + 6);
         }
 
         if (isThinking) {
-          // If we're inside <think>, send the content incrementally
           if (thinkEnd > -1) {
-            // We've reached the end of <think>
             const thinkContent = buffer.substring(0, thinkEnd);
-            webviewView.webview.postMessage({
-              command: "appendThink",
-              content: thinkContent,
-            });
-            buffer = buffer.substring(thinkEnd + 7); // Remove </think> from buffer
-            isThinking = false; // Exit <think> section
-          } else {
-            // Send the current buffer content as part of the thought process
+            if (hideThinking) {
+              webviewView.webview.postMessage({
+                command: "appendThink",
+                content: thinkContent,
+              });
+            }
+            buffer = buffer.substring(thinkEnd + 7);
+            isThinking = false;
+          } else if (hideThinking) {
             webviewView.webview.postMessage({
               command: "appendThink",
               content: buffer,
             });
-            buffer = ""; // Clear the buffer after sending
+            buffer = "";
           }
         }
 
-        // Handle <answer> section (unchanged)
         const answerStart = buffer.indexOf("<answer>");
         const answerEnd = buffer.indexOf("</answer>", answerStart + 1);
 
         if (answerStart > -1 && answerEnd > answerStart) {
-          const before = buffer.substring(0, answerStart);
-          const content = buffer.substring(answerStart + 8, answerEnd);
+          const content = buffer
+            .substring(answerStart + 8, answerEnd)
+            .replace(/\n+/g, " ");
           buffer = buffer.substring(answerEnd + 9);
-
-          if (before) {
-            webviewView.webview.postMessage({
-              command: "appendRaw",
-              content: before,
-            });
-          }
 
           webviewView.webview.postMessage({
             command: "appendAnswer",
@@ -195,7 +186,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         } else if (buffer.length > 0 && !buffer.includes("<")) {
           webviewView.webview.postMessage({
             command: "appendRaw",
-            content: buffer,
+            content: buffer.replace(/\n+/g, " "),
           });
           buffer = "";
         }
@@ -230,12 +221,11 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" 
-          content="default-src 'none'; 
-                  img-src ${this._view!.webview.cspSource} data:;
-                  script-src 'nonce-${nonce}';
-                  style-src ${this._view!.webview.cspSource} 'unsafe-inline';
-                  font-src ${this._view!.webview.cspSource}">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
+      this._view!.webview.cspSource
+    } data:; script-src 'nonce-${nonce}'; style-src ${
+      this._view!.webview.cspSource
+    } 'unsafe-inline'; font-src ${this._view!.webview.cspSource}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="${styleUri}">
     <script nonce="${nonce}" src="${markedUri}"></script>
@@ -248,22 +238,16 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
           <div class="dot-flashing"></div>
         </div>
         <div class="input-container">
-            <textarea 
-                id="input" 
-                placeholder="Ask the Sun & Moon Fairy..." 
-                rows="1"
-                ${this._isGenerating ? "disabled" : ""}
-            ></textarea>
+            <textarea id="input" placeholder="Spill the tea! What do you want to know from your favorite fairy fashionista?"  rows="1" ${
+              this._isGenerating ? "disabled" : ""
+            }></textarea>
             <button id="sendBtn" class="${
               this._isGenerating ? "disabled" : ""
-            }" 
-                    title="${
-                      this._isGenerating ? "Stop generation" : "Send message"
-                    }"
-                    aria-label="${
-                      this._isGenerating ? "Stop generation" : "Send message"
-                    }">
-            </button>
+            }" title="${
+      this._isGenerating ? "Stop generation" : "Send message"
+    }" aria-label="${
+      this._isGenerating ? "Stop generation" : "Send message"
+    }"></button>
         </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>

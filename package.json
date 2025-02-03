@@ -33,7 +33,7 @@
         {
           "id": "stella-sidebar",
           "title": "Stella",
-          "icon": "media/icon.png"
+          "icon": "media/stella.svg"
         }
       ]
     },
@@ -41,7 +41,7 @@
       "stella-sidebar": [
         {
           "id": "stellaView",
-          "name": "Stella Chat",
+          "name": "Tea Party Room",
           "type": "webview"
         }
       ]
