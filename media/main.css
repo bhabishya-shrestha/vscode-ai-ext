@@ -1,3 +1,4 @@
+/* main.css - Apple-inspired design with working logic */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
@@ -8,81 +9,181 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  --stella-accent: #007aff;
+  --stella-border: rgba(255, 255, 255, 0.1);
 }
 
 .chat-container {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 1rem;
+  padding: 16px;
+  gap: 12px;
   overflow: hidden;
 }
 
 #messages {
   flex: 1;
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 16px;
+  scroll-behavior: smooth;
 }
 
 .message {
-  max-width: 80%;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  word-wrap: break-word;
+  max-width: 85%;
+  padding: 14px 18px;
+  border-radius: 18px;
+  position: relative;
+  font-size: 0.95em;
+  line-height: 1.5;
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 .message.user {
   align-self: flex-end;
-  background-color: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background-color: var(--stella-accent);
+  color: #fff;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .message.ai {
   align-self: flex-start;
-  background-color: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
-}
-
-.message.error {
-  background-color: var(--vscode-inputValidation-errorBackground);
-  color: var(--vscode-inputValidation-errorForeground);
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--stella-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
 }
 
 .input-container {
+  position: relative;
   display: flex;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background-color: var(--vscode-sideBar-background);
-  border-top: 1px solid var(--vscode-sideBar-border);
+  gap: 8px;
+  padding: 12px;
+  background-color: var(--vscode-editor-background);
+  border-radius: 14px;
+  margin: 8px;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.05);
 }
 
 #input {
   flex: 1;
-  padding: 0.5rem;
-  border: 1px solid var(--vscode-input-border);
-  border-radius: 4px;
+  padding: 12px 48px 12px 16px;
+  border: none;
+  border-radius: 12px;
   background-color: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   resize: none;
+  font-size: 0.95em;
+  line-height: 1.5;
+  min-height: 44px;
+  transition: all 0.2s ease;
 }
 
 #sendBtn {
-  padding: 0.5rem 1rem;
-  background-color: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background-color: var(--stella-accent);
+  color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+#sendBtn:hover {
+  background-color: #0066cc;
+  transform: scale(1.05);
+}
+
+#sendBtn:active {
+  transform: scale(0.95);
 }
 
 #sendBtn.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  background-color: var(--vscode-disabledForeground);
 }
 
+/* Magical wand icon */
+#sendBtn::after {
+  content: "";
+  display: block;
+  width: 20px;
+  height: 20px;
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwcHgiIGhlaWdodD0iODAwcHgiIHZpZXdCb3g9IjAgMCAxNiAxNiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmaWxsPSJub25lIj48ZyBmaWxsPSIjMDAwMDAwIj48cGF0aCBkPSJNNC4wODMuMTgzYS41LjUgMCAwMC0uNjUuNjVsLjM5My45ODFhLjUuNSAwIDAxMCAuMzcxbC0uMzkzLjk4MmEuNS41IDAgMDAuNjUuNjVsLjk4MS0uMzkzYS41LjUgMCAwMS4zNzIgMGwuOTguMzkyYS41LjUgMCAwMC42NS0uNjVsLS4zOTItLjk4YS41LjUgMCAwMTAtLjM3MmwuMzkzLS45ODFhLjUuNSAwIDAwLS42NS0uNjVsLS45ODEuMzkyYS41LjUgMCAwMS0uMzcyIDBsLS45OC0uMzkyeiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTExLjQxNCA0LjEwNGEyIDIgMCAwMC0yLjgyOCAwTC44MDggMTEuODgyYTIgMiAwIDAwMi44MjggMi44MjhsNy43NzgtNy43NzhhMiAyIDAgMDAwLTIuODI4em0tMS43NjggMS4wNmEuNS41IDAgMDEuNzA4LjcwN2wtLjg4NC44ODQtLjcwNy0uNzA3Ljg4My0uODg0ek03LjcwMiA3LjExbC43MDcuNzA3LTUuODM0IDUuODM0YS41LjUgMCAxMS0uNzA3LS43MDdsNS44MzQtNS44MzR6IiBjbGlwLXJ1bGU9ImV2ZW5vZGQiLz48cGF0aCBkPSJNMTAuNTcyIDExLjIxYS41LjUgMCAwMTAtLjkybDEuMjItLjUyMmEuNS41IDAgMDAuMjYyLS4yNjJsLjUyMi0xLjIyYS41LjUgMCAwMS45MiAwbC41MjEgMS4yMmEuNS41IDAgMDAuMjYzLjI2MmwzLjIxOS41MjJhLjUuNSAwIDAxMCAuOTJsLTEuMjE5LjUyMmEuNS41IDAgMDAtLjI2My4yNjNsLS41MjIgMS4yMThhLjUuNSAwIDAxLS45MTkgMGwtLjUyMi0xLjIxOGEuNS41IDAgMDAtLjI2My0uMjYzbC0xLjIxOS0uNTIyeiIvPjxwYXRoIGQ9Ik0xMi44MzMuMTgzYS41LjUgMCAwMC0uNjUuNjVsLjI5My43MzFhLjUuNSAwIDAxMCAuMzcxbC0uMjkzLjczMmEuNS41IDAgMDAuNjUuNjVsLjczMS0uMjkzYS41LjUgMCAwMS4zNzIgMGwuNzMuMjkyYS41LjUgMCAwMC42NS0uNjVsLS4yOTItLjczYS41LjUgMCAwMTAtLjM3MmwuMjkzLS43MzFhLjUuNSAwIDAwLS42NS0uNjVsLS43MzEuMjkyYS41LjUgMCAwMS0uMzcyIDBsLS43My0uMjkyeiIvPjwvZz48L3N2Zz4=");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+#sendBtn.disabled::after {
+  opacity: 0.5;
+}
+
+/* Thought Process Styles (preserved functionality) */
+.think-container {
+  margin: 12px 0;
+  border-left: 2px solid var(--stella-accent);
+  padding-left: 16px;
+}
+
+.think-toggle {
+  cursor: pointer;
+  color: var(--stella-accent);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  user-select: none;
+  font-size: 0.9em;
+  font-weight: 500;
+  padding: 6px 0;
+}
+
+.toggle-icon {
+  transition: transform 0.2s ease;
+  font-size: 0.8em;
+}
+
+.think-toggle:hover .toggle-icon {
+  transform: translateX(2px);
+}
+
+.think-content {
+  padding: 12px;
+  background: var(--vscode-editorHoverWidget-background);
+  border-radius: 12px;
+  margin: 8px 0;
+  font-size: 0.9em;
+  line-height: 1.6;
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.think-content.hidden {
+  display: none;
+}
+
+.final-answer {
+  margin: 16px 0 8px;
+  padding: 16px;
+  background: var(--vscode-editor-background);
+  border-radius: 18px;
+  border: 1px solid var(--stella-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* Fixed typing indicator */
 #typing-indicator {
   display: flex;
   justify-content: center;
@@ -95,67 +196,36 @@ body {
 
 .dot-flashing {
   position: relative;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background-color: var(--vscode-button-background);
-  animation: dot-flashing 1s infinite linear alternate;
-  animation-delay: 0.5s;
-}
-
-.dot-flashing::before,
-.dot-flashing::after {
-  content: "";
-  display: inline-block;
-  position: absolute;
-  top: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background-color: var(--vscode-button-background);
-  animation: dot-flashing 1s infinite alternate;
-}
-
-.dot-flashing::before {
-  left: -15px;
-  animation-delay: 0s;
-}
-
-.dot-flashing::after {
-  left: 15px;
-  animation-delay: 1s;
+  background-color: var(--stella-accent);
+  animation: dot-flashing 1.2s infinite linear;
 }
 
 @keyframes dot-flashing {
-  0% {
-    opacity: 0.2;
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
   }
-  50% {
+  40% {
     opacity: 1;
   }
-  100% {
-    opacity: 0.2;
-  }
 }
 
-/* Styling for the toggled thought segments */
-.think-container {
-  display: inline-block;
-  border: 1px dashed gray;
-  padding: 2px 4px;
-  margin: 0 2px;
-  border-radius: 4px;
-  background-color: var(--vscode-editor-background);
+/* Preserved code block styles */
+pre code.hljs {
+  border-radius: 8px;
+  padding: 1.2em;
+  font-size: 0.9em;
+  background: var(--vscode-editor-background) !important;
+  border: 1px solid var(--stella-border);
 }
 
-.think-toggle {
-  color: var(--vscode-link-foreground, blue);
-  text-decoration: underline;
-  cursor: pointer;
-  margin-right: 4px;
-  font-weight: bold;
-}
-
-.think-content.hidden {
-  display: none;
+code {
+  font-family: var(--vscode-editor-font-family);
+  background: var(--vscode-textCodeBlock-background);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
 }

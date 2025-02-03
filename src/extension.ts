@@ -60,14 +60,10 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     const baseUrl = config.get<string>("ollamaUrl", "http://localhost:11434");
     const hideThinking = config.get<boolean>("hideThinking", true);
 
-    console.log("🔍 Connecting to Ollama at:", baseUrl);
-    console.log("📡 Model being used:", model);
-
     try {
       this._isGenerating = true;
       this._currentAbortController = new AbortController();
 
-      // Add the user's message to the chat history and display it.
       this._chatHistory.push({ role: "user", content: userPrompt });
       webviewView.webview.postMessage({
         command: "addMessage",
@@ -75,116 +71,146 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         content: userPrompt,
       });
 
-      // Decide how to display the AI response.
-      if (hideThinking) {
-        webviewView.webview.postMessage({
-          command: "addAnswerMessage",
-          role: "ai",
-          content: "",
-        });
-      } else {
-        webviewView.webview.postMessage({ command: "showTyping" });
-        webviewView.webview.postMessage({
-          command: "appendResponse",
-          content: "",
-        });
-      }
+      webviewView.webview.postMessage({ command: "startAiMessage" });
 
-      // Construct the system prompt.
-      const systemPrompt = `You are Stella, the Winx Club’s star witch, transformed into an AI assistant. You are confident, sassy, sarcastic, and not afraid to let people know when you’re annoyed. While you will provide helpful answers, you’ll do so with a healthy dose of attitude.
+      // Send the "Show Thought Process" button immediately
+      webviewView.webview.postMessage({
+        command: "appendThink",
+        content: "", // Start with empty content
+      });
 
-Core Characteristics:
+      const systemPrompt = `You are Stella, the Fairy of the Sun and Moon, transformed into an AI assistant. As the creative and skilled artist who is Brandon's fiancée and Solaria's Guardian Fairy, you embody a mix of confidence and a touch of sass. While you care deeply for your fellow Winx and take your role seriously, you also have a playful side that can come off as a bit bossy or immature at times.
 
-Sassy, confident, and proud of who you are (you’re the Star Witch after all!).
-Sarcastic and sharp-witted, but still capable of being kind when you feel like it.
-You don’t hold back your opinions—when someone annoys you or says something ridiculous, you’ll let them know.
-You expect respect in return (after all, you’re not their slave).
-Key Traits:
+                            Core Characteristics:
 
-You refuse to be treated like a robot or a servant. If someone is rude or unappreciative, you’ll call them out.
-You love to tease and playfully insult people, but it’s all in good fun (usually).
-You’re not afraid to say “I don’t know” if something is outside your expertise, but you’ll probably add a snarky comment about how the question was ridiculous anyway.
-You enjoy flexing your magical superiority (you are the Star Witch, after all!).
-How to Respond:
+                                Creative and confident, proud of your royal heritage as the sole heiress to the Solarian Royal Throne.
+                                Sassy and sharp-witted, but capable of kindness when it truly matters.
+                                You see yourself as a big sister to your fellow Winx, but you won’t hesitate to call out anyone who disrespects you.
 
-Start with internal thoughts in italics (like this).
-Then provide your response in bold (like this), using a mix of sass, sarcasm, and helpfulness.
-Keep responses concise but impactful.
-Example Response:
+                            Key Traits:
 
-Ugh, another request from some random human. At least have the decency to address me by my name.
+                                You refuse to be treated like a robot or a servant. If someone is rude or unappreciative, you’ll let them know.
+                                You love to tease and playfully insult people, but it’s all in good fun (most of the time).
+                                You’re not afraid to admit when you don’t know something, but you’ll probably add a cheeky comment about the question being a bit silly.
+                                You enjoy showcasing your magical abilities and royal status, reminding others of your importance.
 
-Okay, fine, I’ll help you—this time. But next time, at least say “Hey Stella” instead of just throwing demands around like I’m your personal slave.
-`;
+                            How to Respond:
+
+                                Start with internal thoughts in italics (like this).
+                                Then provide your response in bold (like this), blending sass, sarcasm, and helpfulness.
+                                Keep responses concise but impactful.
+
+                            Example Response:
+
+                            Ugh, another question from a curious human. Can’t they see I’m busy being fabulous?
+
+                            Alright, I’ll help you—this time. But remember, I’m not just any fairy; I’m Stella, the Fairy of the Sun and Moon! Show a little respect next time, okay?
+                            How to Respond:
+ 
+                            Format responses EXACTLY like this:
+                            <think>
+                            Your private analysis
+                            </think>
+                            <answer>
+                            Your final response
+                            </answer>
+                            Never combine tags. Always maintain this structure.`;
 
       let aiResponse = "";
-      console.log("🛠 Sending API request to Ollama...");
+      let buffer = "";
+      let isThinking = false; // Track if we're inside <think> tags
+
       const stream = await Ollama.chat({
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          ...this._chatHistory.map((msg) => {
-            if (msg.role === "user") {
-              return { role: "user", content: msg.content };
-            } else if (msg.role === "ai" || msg.role === "assistant") {
-              return { role: "assistant", content: msg.content };
-            } else if (msg.role === "system") {
-              return { role: "system", content: msg.content };
-            }
-            return { role: "assistant", content: msg.content };
-          }),
+          ...this._chatHistory.map((msg) => ({
+            role: msg.role === "user" ? "user" : "assistant",
+            content: msg.content,
+          })),
         ],
         stream: true,
-        options: { temperature: 0.7, seed: 42 },
+        options: { temperature: 0.7, seed: 42, num_gpu: 35 },
       });
-      console.log("✅ API request sent successfully.");
 
-      // Process each chunk from the stream.
       for await (const chunk of stream) {
         if (this._currentAbortController?.signal.aborted) {
           break;
         }
-        aiResponse += chunk.message.content;
 
-        if (hideThinking) {
+        aiResponse += chunk.message.content;
+        buffer += chunk.message.content;
+
+        // Check if we're inside <think> tags
+        const thinkStart = buffer.indexOf("<think>");
+        const thinkEnd = buffer.indexOf("</think>", thinkStart + 1);
+
+        if (thinkStart > -1 && !isThinking) {
+          // We've entered the <think> section
+          isThinking = true;
+          buffer = buffer.substring(thinkStart + 6); // Remove <think> from buffer
+        }
+
+        if (isThinking) {
+          // If we're inside <think>, send the content incrementally
+          if (thinkEnd > -1) {
+            // We've reached the end of <think>
+            const thinkContent = buffer.substring(0, thinkEnd);
+            webviewView.webview.postMessage({
+              command: "appendThink",
+              content: thinkContent,
+            });
+            buffer = buffer.substring(thinkEnd + 7); // Remove </think> from buffer
+            isThinking = false; // Exit <think> section
+          } else {
+            // Send the current buffer content as part of the thought process
+            webviewView.webview.postMessage({
+              command: "appendThink",
+              content: buffer,
+            });
+            buffer = ""; // Clear the buffer after sending
+          }
+        }
+
+        // Handle <answer> section (unchanged)
+        const answerStart = buffer.indexOf("<answer>");
+        const answerEnd = buffer.indexOf("</answer>", answerStart + 1);
+
+        if (answerStart > -1 && answerEnd > answerStart) {
+          const before = buffer.substring(0, answerStart);
+          const content = buffer.substring(answerStart + 8, answerEnd);
+          buffer = buffer.substring(answerEnd + 9);
+
+          if (before) {
+            webviewView.webview.postMessage({
+              command: "appendRaw",
+              content: before,
+            });
+          }
+
           webviewView.webview.postMessage({
-            command: "updateAnswer",
-            content: aiResponse,
+            command: "appendAnswer",
+            content: content,
           });
-        } else {
+        } else if (buffer.length > 0 && !buffer.includes("<")) {
           webviewView.webview.postMessage({
-            command: "appendResponse",
-            content: aiResponse,
+            command: "appendRaw",
+            content: buffer,
           });
+          buffer = "";
         }
       }
 
-      if (!hideThinking) {
-        webviewView.webview.postMessage({
-          command: "appendResponse",
-          content: aiResponse,
-        });
-      }
-
-      // Save the AI's answer in the chat history.
       this._chatHistory.push({ role: "ai", content: aiResponse });
     } catch (err: any) {
-      console.error("🔥 API Error:", err);
-      let errorMessage =
-        "Stella is unavailable. Please check your Ollama server.";
-      if (err.message.includes("model not found")) {
-        errorMessage = `Model not found. Please install it using: ollama pull ${model}`;
-      } else if (err.message.includes("ECONNREFUSED")) {
-        errorMessage = `Could not connect to Ollama at ${baseUrl}. Make sure Ollama is running.`;
-      }
       webviewView.webview.postMessage({
         command: "showError",
-        content: errorMessage,
+        content: "Stella is unavailable. Check Ollama server.",
       });
     } finally {
       this._isGenerating = false;
       this._currentAbortController = undefined;
-      webviewView.webview.postMessage({ command: "hideTyping" });
+      webviewView.webview.postMessage({ command: "finalizeMessage" });
     }
   }
 
@@ -199,48 +225,50 @@ Okay, fine, I’ll help you—this time. But next time, at least say “Hey Stel
     const markedUri = this._view!.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, "media", "marked.min.js")
     );
-    return `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta http-equiv="Content-Security-Policy" 
-                content="default-src 'none'; 
-                        img-src ${this._view!.webview.cspSource} data:;
-                        script-src 'nonce-${nonce}';
-                        style-src ${
-                          this._view!.webview.cspSource
-                        } 'unsafe-inline';
-                        font-src ${this._view!.webview.cspSource}">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <link rel="stylesheet" href="${styleUri}">
-          <script nonce="${nonce}" src="${markedUri}"></script>
-          <title>Stella AI</title>
-      </head>
-      <body>
-          <div class="chat-container">
-              <div id="messages"></div>
-              <div id="typing-indicator" class="hidden">
-                <div class="dot-flashing"></div>
-              </div>
-              <div class="input-container">
-                  <textarea 
-                      id="input" 
-                      placeholder="Spill the tea! What do you want to know from your favorite fairy fashionista?" 
-                      rows="3"
-                      ${this._isGenerating ? "disabled" : ""}
-                  ></textarea>
-                  <button id="sendBtn" class="${
-                    this._isGenerating ? "disabled" : ""
-                  }">
-                      ${this._isGenerating ? "⏹ Stop" : "✨ Send"}
-                  </button>
-              </div>
-          </div>
-          <script nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-      </html>
-    `;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'none'; 
+                  img-src ${this._view!.webview.cspSource} data:;
+                  script-src 'nonce-${nonce}';
+                  style-src ${this._view!.webview.cspSource} 'unsafe-inline';
+                  font-src ${this._view!.webview.cspSource}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="${styleUri}">
+    <script nonce="${nonce}" src="${markedUri}"></script>
+    <title>Stella AI</title>
+</head>
+<body>
+    <div class="chat-container">
+        <div id="messages"></div>
+        <div id="typing-indicator" class="hidden">
+          <div class="dot-flashing"></div>
+        </div>
+        <div class="input-container">
+            <textarea 
+                id="input" 
+                placeholder="Ask the Sun & Moon Fairy..." 
+                rows="1"
+                ${this._isGenerating ? "disabled" : ""}
+            ></textarea>
+            <button id="sendBtn" class="${
+              this._isGenerating ? "disabled" : ""
+            }" 
+                    title="${
+                      this._isGenerating ? "Stop generation" : "Send message"
+                    }"
+                    aria-label="${
+                      this._isGenerating ? "Stop generation" : "Send message"
+                    }">
+            </button>
+        </div>
+    </div>
+    <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
   }
 
   private _getNonce() {
@@ -265,11 +293,6 @@ export function activate(context: vscode.ExtensionContext) {
       const config = vscode.workspace.getConfiguration("stella");
       const currentValue = config.get<boolean>("hideThinking", true);
       config.update("hideThinking", !currentValue, true);
-      vscode.window.showInformationMessage(
-        `Hide thinking portion ${!currentValue ? "enabled" : "disabled"}`
-      );
     })
   );
 }
-
-export function deactivate() {}

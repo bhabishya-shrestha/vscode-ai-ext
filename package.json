@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/bhabishya-shrestha/vscode-ai-ext"
   },
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.96.0"
   },
