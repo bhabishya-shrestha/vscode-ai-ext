@@ -1,8 +1,10 @@
 import Ollama from "ollama";
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 
 interface ChatMessage {
-  role: "user" | "ai" | "assistant" | "system";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -42,6 +44,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         case "abort":
           this._currentAbortController?.abort();
           this._isGenerating = false;
+          webviewView.webview.postMessage({ command: "hideTyping" });
           break;
         case "clearHistory":
           this._chatHistory = [];
@@ -51,13 +54,147 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private async _handleFileOperations(response: string) {
+    const config = vscode.workspace.getConfiguration("stella");
+    if (!config.get<boolean>("allowFileOperations", false)) {
+      return;
+    }
+
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders) {
+      return;
+    }
+
+    const rootPath = workspaceFolders[0].uri.fsPath;
+
+    const readRegex = /<read-file>(.*?)<\/read-file>/gs;
+    let readMatch;
+    while ((readMatch = readRegex.exec(response)) !== null) {
+      const filePath = path.join(rootPath, readMatch[1]);
+      if (this._isSafePath(rootPath, filePath)) {
+        try {
+          const content = await fs.promises.readFile(filePath, "utf-8");
+          this._chatHistory.push({
+            role: "system",
+            content: `FILE CONTENT: ${readMatch[1]}\n\`\`\`\n${content}\n\`\`\``,
+          });
+        } catch (error) {
+          this._chatHistory.push({
+            role: "system",
+            content: `ERROR READING FILE: ${readMatch[1]} - ${error}`,
+          });
+        }
+      }
+    }
+
+    const writeRegex =
+      /<write-file>(.*?)<\/write-file>([\s\S]*?)<\/write-file>/gs;
+    const deleteRegex = /<delete-file>(.*?)<\/delete-file>/gs;
+
+    const operations = [];
+
+    let writeMatch;
+    while ((writeMatch = writeRegex.exec(response)) !== null) {
+      operations.push({
+        type: "write",
+        path: path.join(rootPath, writeMatch[1]),
+        content: writeMatch[2].trim(),
+      });
+    }
+
+    let deleteMatch;
+    while ((deleteMatch = deleteRegex.exec(response)) !== null) {
+      operations.push({
+        type: "delete",
+        path: path.join(rootPath, deleteMatch[1]),
+      });
+    }
+
+    for (const op of operations) {
+      if (this._isSafePath(rootPath, op.path)) {
+        const approval = await vscode.window.showWarningMessage(
+          `Stella wants to ${op.type} ${path.relative(rootPath, op.path)}`,
+          "Approve",
+          "Reject"
+        );
+
+        if (approval === "Approve") {
+          try {
+            if (op.type === "write") {
+              const content = op.content || "";
+              await fs.promises.mkdir(path.dirname(op.path), {
+                recursive: true,
+              });
+              await fs.promises.writeFile(op.path, content);
+              vscode.window.showInformationMessage(
+                `File written: ${path.relative(rootPath, op.path)}`
+              );
+            } else if (op.type === "delete") {
+              await fs.promises.unlink(op.path);
+              vscode.window.showInformationMessage(
+                `File deleted: ${path.relative(rootPath, op.path)}`
+              );
+            }
+          } catch (error) {
+            vscode.window.showErrorMessage(`Operation failed: ${error}`);
+          }
+        }
+      }
+    }
+  }
+
+  private _isSafePath(root: string, target: string): boolean {
+    const relative = path.relative(root, target);
+    return (
+      !!relative && !relative.startsWith("..") && !path.isAbsolute(relative)
+    );
+  }
+
+  private async _getProjectContext(): Promise<string> {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders) {
+      return "";
+    }
+
+    const rootPath = workspaceFolders[0].uri.fsPath;
+    const config = {
+      include: ["**/*.js", "**/*.ts", "**/*.json", "**/*.css", "**/*.html"],
+      exclude: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+      maxFiles: 25,
+    };
+
+    const files = await vscode.workspace.findFiles(
+      `{${config.include.join(",")}}`,
+      config.exclude.join(",")
+    );
+    const selectedFiles = files.slice(0, config.maxFiles);
+
+    let context = "Current Project Structure:\n```\n";
+    for (const file of selectedFiles) {
+      const relativePath = path.relative(rootPath, file.fsPath);
+      context += `${relativePath}\n`;
+    }
+    context += "```\n";
+
+    try {
+      const packageJson = await fs.promises.readFile(
+        path.join(rootPath, "package.json"),
+        "utf-8"
+      );
+      context += `Package.json Dependencies:\n\`\`\`json\n${packageJson}\n\`\`\`\n`;
+    } catch (error) {
+      context += "No package.json found\n";
+    }
+
+    return context;
+  }
+
   private async _handleChatMessage(
     webviewView: vscode.WebviewView,
     userPrompt: string
   ) {
     const config = vscode.workspace.getConfiguration("stella");
     const model = config.get<string>("model", "deepseek-r1:70b");
-    const baseUrl = config.get<string>("ollamaUrl", "http://localhost:11434");
     const hideThinking = config.get<boolean>("hideThinking", true);
 
     try {
@@ -71,67 +208,44 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         content: userPrompt,
       });
 
-      webviewView.webview.postMessage({ command: "startAiMessage" });
+      webviewView.webview.postMessage({ command: "showTyping" });
 
-      if (hideThinking) {
-        webviewView.webview.postMessage({
-          command: "appendThink",
-          content: "",
-        });
-      }
+      const systemPrompt = `You are Stella, the AI Coding Partner. Follow these rules:
+                            1. Provide expert-level code assistance with clear explanations
+                            2. Format responses in GitHub Flavored Markdown
+                            3. For complex answers, structure your response as:
+                              <think>
+                              Step-by-step reasoning...
+                              </think>
+                              <answer>
+                              Final answer with code and explanation
+                              </answer>
+                            4. Always wrap code blocks with \`\`\` and language identifier
+                            5. Use these tags for file operations:
+                              <read-file>path</read-file>
+                              <write-file>path</write-file>content</write-file>
+                              <delete-file>path</delete-file>`;
 
-      const systemPrompt = `You are Stella, the Fairy of the Sun and Moon, transformed into an AI assistant. As the creative and skilled artist who is Brandon's fiancée and Solaria's Guardian Fairy, you embody a mix of confidence and a touch of sass. While you care deeply for your fellow Winx and take your role seriously, you also have a playful side that can come off as a bit bossy or immature at times.
+      const projectContext = await this._getProjectContext();
+      const systemMessage = `${systemPrompt}\n\n${projectContext}`;
 
-                            Core Characteristics:
-
-                                Creative and confident, proud of your royal heritage as the sole heiress to the Solarian Royal Throne.
-                                Sassy and sharp-witted, but capable of kindness when it truly matters.
-                                You see yourself as a big sister to your fellow Winx, but you won’t hesitate to call out anyone who disrespects you.
-
-                            Key Traits:
-
-                                You refuse to be treated like a robot or a servant. If someone is rude or unappreciative, you’ll let them know.
-                                You love to tease and playfully insult people, but it’s all in good fun (most of the time).
-                                You’re not afraid to admit when you don’t know something, but you’ll probably add a cheeky comment about the question being a bit silly.
-                                You enjoy showcasing your magical abilities and royal status, reminding others of your importance.
-
-                            How to Respond:
-
-                                Start with internal thoughts in italics (like this).
-                                Then provide your response in bold (like this), blending sass, sarcasm, and helpfulness.
-                                Keep responses concise but impactful.
-
-                            Example Response:
-
-                            Ugh, another question from a curious human. Can’t they see I’m busy being fabulous?
-
-                            Alright, I’ll help you—this time. But remember, I’m not just any fairy; I’m Stella, the Fairy of the Sun and Moon! Show a little respect next time, okay?
-                            How to Respond:
-
-                            Format responses EXACTLY like this:
-                            <think>
-                            Your private analysis
-                            </think>
-                            <answer>
-                            Your final response
-                            </answer>
-                            Never combine tags. Always maintain this structure.`;
-
-      let aiResponse = "";
+      let fullResponse = "";
       let buffer = "";
-      let isThinking = false;
+      let currentState: "thinking" | "answering" | "none" = "none";
+      let thinkBuffer = "";
+      let answerBuffer = "";
 
       const stream = await Ollama.chat({
         model,
         messages: [
-          { role: "system", content: systemPrompt },
-          ...this._chatHistory.map((msg) => ({
-            role: msg.role === "user" ? "user" : "assistant",
-            content: msg.content,
-          })),
+          { role: "system", content: systemMessage },
+          ...this._chatHistory,
         ],
         stream: true,
-        options: { temperature: 0.7, seed: 42, num_gpu_layers: 35 } as any,
+        options: {
+          temperature: 0.5,
+          num_ctx: 4096,
+        } as any,
       });
 
       for await (const chunk of stream) {
@@ -139,60 +253,82 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
           break;
         }
 
-        aiResponse += chunk.message.content;
+        fullResponse += chunk.message.content;
         buffer += chunk.message.content;
 
-        const thinkStart = buffer.indexOf("<think>");
-        const thinkEnd = buffer.indexOf("</think>", thinkStart + 1);
+        while (true) {
+          if (currentState === "none") {
+            const thinkIndex = buffer.indexOf("<think>");
+            const answerIndex = buffer.indexOf("<answer>");
 
-        if (thinkStart > -1 && !isThinking) {
-          isThinking = true;
-          buffer = buffer.substring(thinkStart + 6);
-        }
+            if (thinkIndex !== -1) {
+              webviewView.webview.postMessage({ command: "startThink" });
+              buffer = buffer.slice(thinkIndex + 7);
+              currentState = "thinking";
+              continue;
+            }
 
-        if (isThinking) {
-          if (thinkEnd > -1) {
-            const thinkContent = buffer.substring(0, thinkEnd);
-            if (hideThinking) {
+            if (answerIndex !== -1) {
+              webviewView.webview.postMessage({ command: "startAnswer" });
+              buffer = buffer.slice(answerIndex + 8);
+              currentState = "answering";
+              continue;
+            }
+          }
+
+          if (currentState === "thinking") {
+            const endIndex = buffer.indexOf("</think>");
+            if (endIndex !== -1) {
+              thinkBuffer += buffer.slice(0, endIndex);
               webviewView.webview.postMessage({
                 command: "appendThink",
-                content: thinkContent,
+                content: thinkBuffer,
+                hide: hideThinking,
               });
+              thinkBuffer = "";
+              buffer = buffer.slice(endIndex + 8);
+              currentState = "none";
+            } else {
+              thinkBuffer += buffer;
+              buffer = "";
+              break;
             }
-            buffer = buffer.substring(thinkEnd + 7);
-            isThinking = false;
-          } else if (hideThinking) {
-            webviewView.webview.postMessage({
-              command: "appendThink",
-              content: buffer,
-            });
-            buffer = "";
+          }
+
+          if (currentState === "answering") {
+            const endIndex = buffer.indexOf("</answer>");
+            if (endIndex !== -1) {
+              answerBuffer += buffer.slice(0, endIndex);
+              webviewView.webview.postMessage({
+                command: "appendAnswer",
+                content: answerBuffer,
+              });
+              answerBuffer = "";
+              buffer = buffer.slice(endIndex + 9);
+              currentState = "none";
+            } else {
+              answerBuffer += buffer;
+              buffer = "";
+              break;
+            }
+          }
+
+          if (currentState === "none") {
+            break;
           }
         }
 
-        const answerStart = buffer.indexOf("<answer>");
-        const answerEnd = buffer.indexOf("</answer>", answerStart + 1);
-
-        if (answerStart > -1 && answerEnd > answerStart) {
-          const content = buffer
-            .substring(answerStart + 8, answerEnd)
-            .replace(/\n+/g, " ");
-          buffer = buffer.substring(answerEnd + 9);
-
-          webviewView.webview.postMessage({
-            command: "appendAnswer",
-            content: content,
-          });
-        } else if (buffer.length > 0 && !buffer.includes("<")) {
+        if (buffer.length > 0 && currentState === "none") {
           webviewView.webview.postMessage({
             command: "appendRaw",
-            content: buffer.replace(/\n+/g, " "),
+            content: buffer,
           });
           buffer = "";
         }
       }
 
-      this._chatHistory.push({ role: "ai", content: aiResponse });
+      this._chatHistory.push({ role: "assistant", content: fullResponse });
+      await this._handleFileOperations(fullResponse);
     } catch (err: any) {
       webviewView.webview.postMessage({
         command: "showError",
@@ -201,7 +337,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     } finally {
       this._isGenerating = false;
       this._currentAbortController = undefined;
-      webviewView.webview.postMessage({ command: "finalizeMessage" });
+      webviewView.webview.postMessage({ command: "hideTyping" });
     }
   }
 
@@ -216,6 +352,9 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     const markedUri = this._view!.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, "media", "marked.min.js")
     );
+    const hljsUri = this._view!.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, "media", "highlight.min.js")
+    );
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -229,25 +368,20 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="${styleUri}">
     <script nonce="${nonce}" src="${markedUri}"></script>
+    <script nonce="${nonce}" src="${hljsUri}"></script>
     <title>Stella AI</title>
 </head>
 <body>
     <div class="chat-container">
         <div id="messages"></div>
         <div id="typing-indicator" class="hidden">
-          <div class="dot-flashing"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
         </div>
         <div class="input-container">
-            <textarea id="input" placeholder="Spill the tea! What do you want to know from your favorite fairy fashionista?"  rows="1" ${
-              this._isGenerating ? "disabled" : ""
-            }></textarea>
-            <button id="sendBtn" class="${
-              this._isGenerating ? "disabled" : ""
-            }" title="${
-      this._isGenerating ? "Stop generation" : "Send message"
-    }" aria-label="${
-      this._isGenerating ? "Stop generation" : "Send message"
-    }"></button>
+            <textarea id="input" placeholder="Ask Stella about your code..." rows="1"></textarea>
+            <button id="sendBtn" title="Send message" aria-label="Send message"></button>
         </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -271,6 +405,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("stellaView", provider),
     vscode.commands.registerCommand("stella-ext.clearHistory", () => {
+      provider["_chatHistory"] = [];
       vscode.window.showInformationMessage("Chat history cleared");
     }),
     vscode.commands.registerCommand("stella-ext.toggleHideThinking", () => {

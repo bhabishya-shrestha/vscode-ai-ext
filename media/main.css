@@ -1,4 +1,4 @@
-/* main.css - Apple-inspired design with working logic */
+/* main.css - Complete Styling for Stella AI Extension */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
@@ -11,8 +11,10 @@ body {
   flex-direction: column;
   --stella-accent: #007aff;
   --stella-border: rgba(255, 255, 255, 0.1);
+  --think-bg: rgba(0, 122, 255, 0.05);
 }
 
+/* Chat Container */
 .chat-container {
   flex: 1;
   display: flex;
@@ -22,6 +24,7 @@ body {
   overflow: hidden;
 }
 
+/* Messages Area */
 #messages {
   flex: 1;
   overflow-y: auto;
@@ -32,6 +35,7 @@ body {
   scroll-behavior: smooth;
 }
 
+/* Base Message Styles */
 .message {
   max-width: 85%;
   padding: 14px 18px;
@@ -42,6 +46,7 @@ body {
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
+/* User Messages */
 .message.user {
   align-self: flex-end;
   background-color: var(--stella-accent);
@@ -50,13 +55,18 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* AI Messages */
 .message.ai {
   align-self: flex-start;
   background-color: var(--vscode-editorWidget-background);
   border: 1px solid var(--stella-border);
+  white-space: pre-wrap;
+  word-break: break-word;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+  margin: 8px 0;
 }
 
+/* Input Area */
 .input-container {
   position: relative;
   display: flex;
@@ -89,7 +99,7 @@ body {
   width: 36px;
   height: 36px;
   padding: 0;
-  background-color: #b90ab1;
+  background-color: #007aff;
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -101,7 +111,7 @@ body {
 }
 
 #sendBtn:hover {
-  background-color: #ff00f2;
+  background-color: #00a2ff;
   transform: scale(1.05);
 }
 
@@ -115,117 +125,173 @@ body {
   background-color: var(--vscode-disabledForeground);
 }
 
-/* Magical wand icon */
+/* Magical Wand Icon */
 #sendBtn::after {
   content: "";
   display: block;
   width: 20px;
   height: 20px;
-  background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwcHgiIGhlaWdodD0iODAwcHgiIHZpZXdCb3g9IjAgMCAxNiAxNiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmaWxsPSJub25lIj48ZyBmaWxsPSIjMDAwMDAwIj48cGF0aCBkPSJNNC4wODMuMTgzYS41LjUgMCAwMC0uNjUuNjVsLjM5My45ODFhLjUuNSAwIDAxMCAuMzcxbC0uMzkzLjk4MmEuNS41IDAgMDAuNjUuNjVsLjk4MS0uMzkzYS41LjUgMCAwMS4zNzIgMGwuOTguMzkyYS41LjUgMCAwMC42NS0uNjVsLS4zOTItLjk4YS41LjUgMCAwMTAtLjM3MmwuMzkzLS45ODFhLjUuNSAwIDAwLS42NS0uNjVsLS45ODEuMzkyYS41LjUgMCAwMS0uMzcyIDBsLS45OC0uMzkyeiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTExLjQxNCA0LjEwNGEyIDIgMCAwMC0yLjgyOCAwTC44MDggMTEuODgyYTIgMiAwIDAwMi44MjggMi44MjhsNy43NzgtNy43NzhhMiAyIDAgMDAwLTIuODI4em0tMS43NjggMS4wNmEuNS41IDAgMDEuNzA4LjcwN2wtLjg4NC44ODQtLjcwNy0uNzA3Ljg4My0uODg0ek03LjcwMiA3LjExbC43MDcuNzA3LTUuODM0IDUuODM0YS41LjUgMCAxMS0uNzA3LS43MDdsNS44MzQtNS44MzR6IiBjbGlwLXJ1bGU9ImV2ZW5vZGQiLz48cGF0aCBkPSJNMTAuNTcyIDExLjIxYS41LjUgMCAwMTAtLjkybDEuMjItLjUyMmEuNS41IDAgMDAuMjYyLS4yNjJsLjUyMi0xLjIyYS41LjUgMCAwMS45MiAwbC41MjEgMS4yMmEuNS41IDAgMDAuMjYzLjI2MmwzLjIxOS41MjJhLjUuNSAwIDAxMCAuOTJsLTEuMjE5LjUyMmEuNS41IDAgMDAtLjI2My4yNjNsLS41MjIgMS4yMThhLjUuNSAwIDAxLS45MTkgMGwtLjUyMi0xLjIxOGEuNS41IDAgMDAtLjI2My0uMjYzbC0xLjIxOS0uNTIyeiIvPjxwYXRoIGQ9Ik0xMi44MzMuMTgzYS41LjUgMCAwMC0uNjUuNjVsLjI5My43MzFhLjUuNSAwIDAxMCAuMzcxbC0uMjkzLjczMmEuNS41IDAgMDAuNjUuNjVsLjczMS0uMjkzYS41LjUgMCAwMS4zNzIgMGwuNzMuMjkyYS41LjUgMCAwMC42NS0uNjVsLS4yOTItLjczYS41LjUgMCAwMTAtLjM3MmwuMjkzLS43MzFhLjUuNSAwIDAwLS42NS0uNjVsLS43MzEuMjkyYS41LjUgMCAwMS0uMzcyIDBsLS43My0uMjkyeiIvPjwvZz48L3N2Zz4=");
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwcHgiIGhlaWdodD0iODAwcHgiIHZpZXdCb3g9IjAgMCAxNiAxNiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmaWxsPSJub25lIj48ZyBmaWxsPSIjMDAwMDAwIj48cGF0aCBkPSJNNC4wODMuMTgzYS41LjUgMCAwMC0uNjUuNjVsLjM5My45ODFhLjUuNSAwIDAxMC4zNzFsLS4zOTMuOTgyYS41LjUgMCAwMC42NS42NWwuOTgxLS4zOTNhLjUuNSAwIDAxLjM3MiAwbC45OC4zOTJhLjUuNSAwIDAwLjY1LS42NWwtLjM5Mi0uOThhLjUuNSAwIDAxMC0uMzcybC4zOTMtLjk4MWEuNS41IDAgMDAtLjY1LS42NWwtLjk4MS4zOTJhLjUuNSAwIDAxLS4zNzIgMGwtLjk4LS4zOTJ6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTEuNDE0IDQuMTA0YTIgMiAwIDAwLTIuODI4IDBMLjgwOCAxMS44ODJhMiAyIDAgMDAyLjgyOCAyLjgyOGw3Ljc3OC03Ljc3OGEyIDIgMCAwMDAtMi44Mjh6bS0xLjc2OCAxLjA2YS41LjUgMCAwMS43MDguNzA3bC0uODg0Ljg4NC0uNzA3LS43MDcuODgzLS44ODR6TTcuNzAyIDcuMTFsLjcwNy43MDctNS44MzQgNS44MzRhLjUuNSAwIDExLS43MDctLjcwN2w1LjgzNC01LjgzNHoiIGNsaXAtcnVsZT0iZXZlbm9kZCIvPjxwYXRoIGQ9Ik0xMC41NzIgMTEuMjFhLjUuNSAwIDAxMC0uOTJsMS4yMi0uNTIyYS41LjUgMCAwMC4yNjItLjI2MmwuNTIyLTEuMjJhLjUuNSAwIDAxLjkyIDBsLjUyMSAxLjIyYS41LjUgMCAwMC4yNjMuMjYybDMuMjE5LjUyMmEuNS41IDAgMTEwIC45MmwtMS4yMTkuNTIyYS41LjUgMCAwMC0uMjYzLjI2M2wtLjUyMiAxLjIxOGEuNS41IDAgMDEtLjkxOSAwbC0uNTIyLTEuMjE4YS41LjUgMCAwMC0uMjYzLS4yNjNsLTEuMjE5LS41MjJ6Ii8+PHBhdGggZD0iTTEyLjgzMy4xODNhLjUuNSAwIDAwLS42NS42NWwuMjkzLjczMWEuNS41IDAgMDEwIC4zNzFsLS4yOTMuNzMyYS41LjUgMCAwMC42NS42NWwuNzMxLS4yOTNhLjUuNSAwIDAxLjM3MiAwbC43My4yOTJhLjUuNSAwIDAwLjY1LS42NWwtLjI5Mi0uNzNhLjUuNSAwIDAxMC0uMzcybC4yOTMtLjk4MWEuNS41IDAgMDAtLjY1LS42NWwtLjczMS4yOTJhLjUuNSAwIDAxLS4zNzIgMGwtLjczLS4yOTJ6Ii8+PC9nPjwvc3ZnPg==");
   background-size: contain;
   background-repeat: no-repeat;
 }
 
-#sendBtn.disabled::after {
-  opacity: 0.5;
+/* Typing Indicator */
+#typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  padding-left: 12px;
 }
 
-/* Thought Process Styles (preserved functionality) */
+#typing-indicator.visible {
+  opacity: 1;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--stella-accent);
+  animation: typing-dot 1.4s infinite linear;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-6px);
+  }
+}
+
+/* Thought Process Containers */
 .think-container {
-  margin: 12px 0;
-  border-left: 2px solid var(--stella-accent);
-  padding-left: 16px;
+  background: var(--vscode-editorHoverWidget-background);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  border-left: 3px solid var(--stella-accent);
+  position: relative;
 }
 
 .think-toggle {
   cursor: pointer;
-  color: var(--stella-accent);
   display: flex;
-  gap: 8px;
   align-items: center;
-  user-select: none;
-  font-size: 0.9em;
+  gap: 8px;
+  color: var(--stella-accent);
+  font-size: 0.85em;
   font-weight: 500;
-  padding: 6px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.think-toggle:hover {
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .toggle-icon {
-  transition: transform 0.2s ease;
   font-size: 0.8em;
-}
-
-.think-toggle:hover .toggle-icon {
-  transform: translateX(2px);
+  transition: transform 0.2s ease;
 }
 
 .think-content {
-  padding: 12px;
-  background: var(--vscode-editorHoverWidget-background);
-  border-radius: 12px;
-  margin: 8px 0;
   font-size: 0.9em;
-  line-height: 1.6;
   color: var(--vscode-descriptionForeground);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.think-content.hidden {
+  line-height: 1.4;
+  padding: 8px;
+  margin-top: 8px;
+  border-radius: 4px;
+  background: var(--think-bg);
   display: none;
 }
 
-.final-answer {
-  margin: 16px 0 8px;
-  padding: 16px;
-  background: var(--vscode-editor-background);
-  border-radius: 18px;
-  border: 1px solid var(--stella-border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+.think-content.visible {
+  display: block;
+  animation: fadeIn 0.3s ease;
 }
 
-/* Fixed typing indicator */
-#typing-indicator {
-  display: flex;
-  justify-content: center;
-  padding: 0.5rem;
-}
-
-#typing-indicator.hidden {
-  display: none;
-}
-
-.dot-flashing {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--stella-accent);
-  animation: dot-flashing 1.2s infinite linear;
-}
-
-@keyframes dot-flashing {
-  0%,
-  80%,
-  100% {
-    opacity: 0.3;
-  }
-  40% {
-    opacity: 1;
-  }
-}
-
-/* Preserved code block styles */
-pre code.hljs {
-  border-radius: 8px;
-  padding: 1.2em;
-  font-size: 0.9em;
-  background: var(--vscode-editor-background) !important;
-  border: 1px solid var(--stella-border);
-}
-
-code {
+/* Code Blocks */
+.message.ai code {
   font-family: var(--vscode-editor-font-family);
-  background: var(--vscode-textCodeBlock-background);
+  background-color: var(--vscode-textCodeBlock-background);
   padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+.message.ai pre code {
+  display: block;
+  padding: 1em;
+  margin: 0.5em 0;
+  border-radius: 4px;
+  overflow-x: auto;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--stella-border);
+}
+
+/* Error Messages */
+.error-message {
+  color: #ff453a;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(255, 69, 58, 0.1);
+  border: 1px solid rgba(255, 69, 58, 0.2);
+  margin: 8px 0;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive Adjustments */
+@media (max-width: 600px) {
+  .message {
+    max-width: 90%;
+  }
+
+  #input {
+    font-size: 0.9em;
+  }
+
+  .think-container {
+    padding: 8px;
+  }
+}
+
+/* Scrollbar Styling */
+#messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+#messages::-webkit-scrollbar-track {
+  background: var(--vscode-editor-background);
+}
+
+#messages::-webkit-scrollbar-thumb {
+  background: var(--stella-accent);
   border-radius: 3px;
 }
