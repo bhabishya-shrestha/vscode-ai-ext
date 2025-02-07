@@ -1,8 +1,7 @@
-import Ollama from "ollama";
 import * as vscode from "vscode";
-import * as fs from "fs";
 import * as path from "path";
-import { FileHandler } from "./utils/FileHandler";
+import * as fs from "fs";
+import Ollama from "ollama";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -15,70 +14,106 @@ interface MessageStructure {
   content: string;
 }
 
-class StellaViewProvider implements vscode.WebviewViewProvider {
-  private _view?: vscode.WebviewView;
-  private _chatHistory: ChatMessage[] = [];
-  private _isGenerating = false;
-  private _currentAbortController?: AbortController;
+class ChatHistory {
+  private messages: ChatMessage[] = [];
+  private readonly storageKey = "stella-chat-history";
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  async saveToStorage(context: vscode.ExtensionContext) {
+    await context.globalState.update(this.storageKey, this.messages);
+  }
 
-  resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+  async loadFromStorage(context: vscode.ExtensionContext) {
+    const stored = context.globalState.get<ChatMessage[]>(this.storageKey, []);
+    this.messages = stored;
+    return this.messages;
+  }
+
+  getMessages(): ChatMessage[] {
+    return this.messages;
+  }
+
+  addMessage(message: ChatMessage) {
+    this.messages.push(message);
+  }
+
+  clear() {
+    this.messages = [];
+  }
+}
+
+export class StellaViewProvider implements vscode.WebviewViewProvider {
+  private view?: vscode.WebviewView;
+  private chatHistory: ChatHistory;
+  private isGenerating = false;
+  private currentAbortController?: AbortController;
+
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly context: vscode.ExtensionContext
   ) {
-    this._view = webviewView;
+    this.chatHistory = new ChatHistory();
+  }
+
+  async resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    context: vscode.WebviewViewResolveContext,
+    token: vscode.CancellationToken
+  ) {
+    this.view = webviewView;
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this._extensionUri],
+      localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this._getWebviewContent();
+    webviewView.webview.html = this.getWebviewContent();
 
-    webviewView.webview.onDidReceiveMessage(async (message: any) => {
+    // Load chat history
+    await this.chatHistory.loadFromStorage(this.context);
+    await this.rebuildChatHistory();
+
+    webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
         case "chat":
-          if (this._isGenerating) {
+          if (this.isGenerating) {
             vscode.window.showWarningMessage(
               "Please wait for the current response to complete"
             );
             return;
           }
-          await this._handleChatMessage(webviewView, message.text);
+          await this.handleChatMessage(message.text);
           break;
         case "abort":
-          this._currentAbortController?.abort();
-          this._isGenerating = false;
-          webviewView.webview.postMessage({ command: "hideTyping" });
+          this.currentAbortController?.abort();
+          this.isGenerating = false;
+          this.view?.webview.postMessage({ command: "hideTyping" });
           break;
         case "clearHistory":
-          this._chatHistory = [];
-          webviewView.webview.postMessage({ command: "clearHistory" });
+          this.chatHistory.clear();
+          await this.chatHistory.saveToStorage(this.context);
+          this.view?.webview.postMessage({ command: "clearHistory" });
           break;
       }
     });
-
-    this._rebuildChatHistory();
   }
 
-  private async _rebuildChatHistory() {
-    if (!this._view) {
+  private async rebuildChatHistory() {
+    if (!this.view) {
       return;
     }
 
-    this._view.webview.postMessage({ command: "clearHistory" });
+    this.view.webview.postMessage({ command: "clearHistory" });
+    const messages = this.chatHistory.getMessages();
 
-    for (const msg of this._chatHistory) {
+    for (const msg of messages) {
       if (msg.role === "assistant" && msg.structure) {
-        this._view.webview.postMessage({
+        this.view.webview.postMessage({
           command: "addStructuredMessage",
           content: msg.content,
           structure: msg.structure,
         });
       } else {
-        this._view.webview.postMessage({
+        this.view.webview.postMessage({
           command: "addMessage",
           role: msg.role,
           content: msg.content,
@@ -87,56 +122,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleFileOperations(response: string) {
-    const fileHandler = new FileHandler();
-
-    try {
-      // Improved regex patterns for file operations
-      const writeRegex =
-        /<write-file>(.*?)<\/write-file>\s*([\s\S]*?)\s*<\/write-file>/g;
-      const deleteRegex = /<delete-file>(.*?)<\/delete-file>/g;
-
-      // Process write operations
-      let writeMatch;
-      while ((writeMatch = writeRegex.exec(response)) !== null) {
-        const [_, filePath, content] = writeMatch;
-        try {
-          await fileHandler.writeFile(filePath.trim(), content.trim());
-          this._chatHistory.push({
-            role: "system",
-            content: `FILE CREATED: ${filePath}`,
-          });
-        } catch (err: any) {
-          this._chatHistory.push({
-            role: "system",
-            content: `ERROR WRITING FILE: ${filePath} - ${err.message}`,
-          });
-        }
-      }
-
-      // Process delete operations
-      let deleteMatch;
-      while ((deleteMatch = deleteRegex.exec(response)) !== null) {
-        const filePath = deleteMatch[1].trim();
-        try {
-          await fileHandler.deleteFile(filePath);
-          this._chatHistory.push({
-            role: "system",
-            content: `FILE DELETED: ${filePath}`,
-          });
-        } catch (err: any) {
-          this._chatHistory.push({
-            role: "system",
-            content: `ERROR DELETING FILE: ${filePath} - ${err.message}`,
-          });
-        }
-      }
-    } catch (err) {
-      console.error("Error handling file operations:", err);
-    }
-  }
-
-  private async _getProjectContext(): Promise<string> {
+  private async getProjectContext(): Promise<string> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders) {
       return "";
@@ -173,26 +159,28 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
     return context;
   }
 
-  private async _handleChatMessage(
-    webviewView: vscode.WebviewView,
-    userPrompt: string
-  ) {
+  private async handleChatMessage(userPrompt: string) {
+    if (!this.view) {
+      return;
+    }
+
     const config = vscode.workspace.getConfiguration("stella");
     const model = config.get<string>("model", "deepseek-r1:70b");
     const hideThinking = config.get<boolean>("hideThinking", true);
 
     try {
-      this._isGenerating = true;
-      this._currentAbortController = new AbortController();
+      this.isGenerating = true;
+      this.currentAbortController = new AbortController();
 
-      this._chatHistory.push({ role: "user", content: userPrompt });
-      webviewView.webview.postMessage({
+      const userMessage: ChatMessage = { role: "user", content: userPrompt };
+      this.chatHistory.addMessage(userMessage);
+      this.view.webview.postMessage({
         command: "addMessage",
         role: "user",
         content: userPrompt,
       });
 
-      webviewView.webview.postMessage({ command: "showTyping" });
+      this.view.webview.postMessage({ command: "showTyping" });
 
       const systemPrompt = `You are Stella, the AI Coding Partner. Follow these rules:
 1. Provide expert-level code assistance with clear explanations
@@ -201,20 +189,9 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
   - Start with core files (package.json, main source files)
   - Follow language/framework conventions
   - Include necessary configuration files
-  - Create proper directory structure
-4. For project generation, use these tags first:
-  <project-structure>
-  Recommended file paths:
-  - src/index.js
-  - package.json
-  - README.md
-  </project-structure>
-5. Use these tags for file operations:
-  <read-file>path</read-file>
-  <write-file>path</write-file>content</write-file>
-  <delete-file>path</delete-file>`;
+  - Create proper directory structure`;
 
-      const projectContext = await this._getProjectContext();
+      const projectContext = await this.getProjectContext();
       const systemMessage = `${systemPrompt}\n\n${projectContext}`;
 
       let fullResponse = "";
@@ -228,7 +205,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         model,
         messages: [
           { role: "system", content: systemMessage },
-          ...this._chatHistory,
+          ...this.chatHistory.getMessages(),
         ],
         stream: true,
         options: {
@@ -238,27 +215,28 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       });
 
       for await (const chunk of stream) {
-        if (this._currentAbortController?.signal.aborted) {
+        if (this.currentAbortController?.signal.aborted) {
           break;
         }
 
         fullResponse += chunk.message.content;
         buffer += chunk.message.content;
 
+        // Process message structure
         while (true) {
           if (currentState === "none") {
             const thinkIndex = buffer.indexOf("<think>");
             const answerIndex = buffer.indexOf("<answer>");
 
             if (thinkIndex !== -1) {
-              webviewView.webview.postMessage({ command: "startThink" });
+              this.view.webview.postMessage({ command: "startThink" });
               buffer = buffer.slice(thinkIndex + 7);
               currentState = "thinking";
               continue;
             }
 
             if (answerIndex !== -1) {
-              webviewView.webview.postMessage({ command: "startAnswer" });
+              this.view.webview.postMessage({ command: "startAnswer" });
               buffer = buffer.slice(answerIndex + 8);
               currentState = "answering";
               continue;
@@ -270,7 +248,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             if (endIndex !== -1) {
               thinkBuffer += buffer.slice(0, endIndex);
               structure.push({ type: "think", content: thinkBuffer });
-              webviewView.webview.postMessage({
+              this.view.webview.postMessage({
                 command: "appendThink",
                 content: thinkBuffer,
                 hide: hideThinking,
@@ -290,7 +268,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             if (endIndex !== -1) {
               answerBuffer += buffer.slice(0, endIndex);
               structure.push({ type: "answer", content: answerBuffer });
-              webviewView.webview.postMessage({
+              this.view.webview.postMessage({
                 command: "appendAnswer",
                 content: answerBuffer,
               });
@@ -311,7 +289,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
         if (buffer.length > 0 && currentState === "none") {
           structure.push({ type: "raw", content: buffer });
-          webviewView.webview.postMessage({
+          this.view.webview.postMessage({
             command: "appendRaw",
             content: buffer,
           });
@@ -319,113 +297,105 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         }
       }
 
-      this._chatHistory.push({
+      const assistantMessage: ChatMessage = {
         role: "assistant",
         content: fullResponse,
         structure,
-      });
-      await this._handleFileOperations(fullResponse);
+      };
+      this.chatHistory.addMessage(assistantMessage);
+      await this.chatHistory.saveToStorage(this.context);
     } catch (err: any) {
-      webviewView.webview.postMessage({
+      this.view.webview.postMessage({
         command: "showError",
         content: "Stella is unavailable. Check Ollama server.",
       });
     } finally {
-      this._isGenerating = false;
-      this._currentAbortController = undefined;
-      webviewView.webview.postMessage({ command: "hideTyping" });
+      this.isGenerating = false;
+      this.currentAbortController = undefined;
+      this.view.webview.postMessage({ command: "hideTyping" });
     }
   }
 
-  private _getWebviewContent(): string {
-    const nonce = this._getNonce();
+  private getWebviewContent(): string {
+    const nonce = getNonce();
+    const scriptUri = this.getResourceUri("media/main.js");
+    const styleUri = this.getResourceUri("media/main.css");
+    const markedUri = this.getResourceUri("media/marked.min.js");
+    const highlightUri = this.getResourceUri("media/highlight.min.js");
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
-      this._view!.webview.cspSource
+      this.view!.webview.cspSource
     } data:; script-src 'nonce-${nonce}'; style-src ${
-      this._view!.webview.cspSource
-    } 'unsafe-inline'; font-src ${this._view!.webview.cspSource}">
+      this.view!.webview.cspSource
+    } 'unsafe-inline';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="${this._getResourceUri("media/main.css")}">
-    <script nonce="${nonce}" src="${this._getResourceUri(
-      "media/marked.min.js"
-    )}"></script>
-    <script nonce="${nonce}" src="${this._getResourceUri(
-      "media/highlight.min.js"
-    )}"></script>
+    <link rel="stylesheet" href="${styleUri}">
+    <script nonce="${nonce}" src="${markedUri}"></script>
+    <script nonce="${nonce}" src="${highlightUri}"></script>
     <title>Stella AI</title>
 </head>
 <body>
     <div class="chat-container">
         <div id="messages"></div>
         <div id="typing-indicator" class="hidden">
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
         </div>
         <div class="input-container">
             <textarea id="input" placeholder="Ask Stella about your code..." rows="1"></textarea>
             <button id="sendBtn" title="Send message" aria-label="Send message"></button>
         </div>
     </div>
-    <script nonce="${nonce}" src="${this._getResourceUri(
-      "media/main.js"
-    )}"></script>
+    <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }
 
-  private _getResourceUri(filePath: string): vscode.Uri {
-    return this._view!.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, filePath)
+  private getResourceUri(resourcePath: string): vscode.Uri {
+    return this.view!.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, resourcePath)
     );
-  }
-
-  private _getNonce(): string {
-    return Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  async generateProjectScaffold() {
-    try {
-      const config = vscode.workspace.getConfiguration("stella");
-      await config.update("allowFileOperations", true, true);
-
-      const prompt = `Generate a complete project structure for a [DESCRIBE PROJECT] in this empty folder.
-                      Include all necessary configuration files, source files, and documentation.`;
-
-      if (this._view) {
-        await this._handleChatMessage(this._view, prompt);
-      }
-    } catch (err) {
-      console.error("Error generating project scaffold:", err);
-    }
   }
 }
 
+function getNonce(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new StellaViewProvider(context.extensionUri);
+  const provider = new StellaViewProvider(context.extensionUri, context);
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("stellaView", provider),
+
     vscode.commands.registerCommand("stella-ext.clearHistory", () => {
-      provider["_chatHistory"] = [];
+      provider["chatHistory"].clear();
       vscode.window.showInformationMessage("Chat history cleared");
     }),
+
     vscode.commands.registerCommand("stella-ext.toggleHideThinking", () => {
       const config = vscode.workspace.getConfiguration("stella");
       const currentValue = config.get<boolean>("hideThinking", true);
       config.update("hideThinking", !currentValue, true);
-    }),
-    vscode.commands.registerCommand("stella-ext.generateProject", async () => {
-      if (!vscode.workspace.workspaceFolders) {
-        vscode.window.showErrorMessage("Open a folder first");
-        return;
-      }
-      await provider.generateProjectScaffold();
     })
   );
+
+  return {
+    async toggleHideThinking() {
+      const config = vscode.workspace.getConfiguration("stella");
+      const current = config.get("hideThinking");
+      await config.update(
+        "hideThinking",
+        !current,
+        vscode.ConfigurationTarget.Global
+      );
+    },
+  };
 }

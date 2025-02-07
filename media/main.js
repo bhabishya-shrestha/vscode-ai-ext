@@ -7,44 +7,51 @@
 
   let currentAiMessage = null;
   let markedInitialized = false;
-  const messageBuffers = new WeakMap();
+  const messageBuffers = new Map();
   const allThinkContainers = [];
+
+  // Initialize marked with options
+  function initializeMarked() {
+    if (!markedInitialized) {
+      marked.setOptions({
+        gfm: true,
+        breaks: true,
+        smartypants: true,
+        highlight: (code, lang) => {
+          try {
+            return hljs.highlightAuto(code).value;
+          } catch (e) {
+            return code;
+          }
+        },
+      });
+      markedInitialized = true;
+    }
+  }
 
   function parseContent(content) {
     initializeMarked();
     try {
-      return marked.parse(content, {
-        gfm: true,
-        breaks: false,
-        highlight: (code, lang) => {
-          return hljs.highlightAuto(code).value;
-        },
-      });
+      return marked.parse(content);
     } catch (e) {
+      console.error("Markdown parsing error:", e);
       return content;
-    }
-  }
-
-  function initializeMarked() {
-    if (!markedInitialized) {
-      marked.setOptions({
-        smartypants: true,
-        silent: true,
-      });
-      markedInitialized = true;
     }
   }
 
   function createMessageElement(content, role) {
     const messageElement = document.createElement("div");
     messageElement.className = `message ${role}`;
-    messageElement.innerHTML = content;
-    messageBuffers.set(messageElement, "");
+    messageElement.innerHTML = parseContent(content);
+    messageBuffers.set(messageElement, content);
     return messageElement;
   }
 
-  function scrollToBottom() {
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  function scrollToBottom(smooth = true) {
+    messagesContainer.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: smooth ? "smooth" : "auto",
+    });
   }
 
   function sendMessage() {
@@ -54,9 +61,25 @@
       input.value = "";
       input.style.height = "44px";
       currentAiMessage = null;
+      scrollToBottom();
     }
   }
 
+  function resizeInput() {
+    // Reset height to minimum to get the correct scrollHeight
+    input.style.height = "44px";
+
+    // Set new height based on content, with a maximum height
+    const maxHeight = 200;
+    const newHeight = Math.min(input.scrollHeight, maxHeight);
+
+    // Only update height if it's different from current
+    if (input.offsetHeight !== newHeight) {
+      input.style.height = `${newHeight}px`;
+    }
+  }
+
+  // Event Listeners
   sendBtn.addEventListener("click", sendMessage);
 
   input.addEventListener("keydown", (event) => {
@@ -66,42 +89,90 @@
     }
   });
 
+  let resizeTimeout;
   input.addEventListener("input", () => {
-    input.style.height = "auto";
-    input.style.height = input.scrollHeight + "px";
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout);
+    }
+    resizeTimeout = setTimeout(resizeInput, 10);
   });
 
-  window.addEventListener("message", (event) => {
-    const { command, content, role, hide, structure } = event.data;
+  input.addEventListener("input", resizeInput);
 
-    switch (command) {
+  // Handle think containers
+  function createThinkContainer(content = "", hide = true) {
+    const container = document.createElement("div");
+    container.className = "think-container";
+    container.innerHTML = `
+          <div class="think-toggle">
+              <span class="toggle-icon">${hide ? "▶" : "▼"}</span>
+              <span class="toggle-text">Thought Process</span>
+          </div>
+          <div class="think-content ${hide ? "" : "visible"}">${parseContent(
+      content
+    )}</div>
+      `;
+
+    const toggle = container.querySelector(".think-toggle");
+    const contentDiv = container.querySelector(".think-content");
+    const toggleIcon = toggle.querySelector(".toggle-icon");
+
+    toggle.addEventListener("click", () => {
+      const isVisible = contentDiv.classList.toggle("visible");
+      toggleIcon.textContent = isVisible ? "▼" : "▶";
+      container.dataset.visible = isVisible.toString();
+      scrollToBottom();
+    });
+
+    return container;
+  }
+
+  // Message handling
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+
+    switch (message.command) {
       case "addMessage":
-        const element = createMessageElement(parseContent(content), role);
+        const element = createMessageElement(message.content, message.role);
         messagesContainer.appendChild(element);
         scrollToBottom();
         break;
 
       case "addStructuredMessage":
-        if (structure) {
-          structure.forEach((part) => {
+        if (message.structure) {
+          message.structure.forEach((part) => {
             switch (part.type) {
               case "think":
-                handleThink(part.content, hide);
+                const container = createThinkContainer(
+                  part.content,
+                  message.hide
+                );
+                messagesContainer.appendChild(container);
+                allThinkContainers.push(container);
                 break;
               case "answer":
-                handleAnswer(part.content);
+                currentAiMessage = createMessageElement(part.content, "ai");
+                messagesContainer.appendChild(currentAiMessage);
                 break;
               case "raw":
-                handleRaw(part.content);
+                if (!currentAiMessage) {
+                  currentAiMessage = createMessageElement("", "ai");
+                  messagesContainer.appendChild(currentAiMessage);
+                }
+                const buffer =
+                  messageBuffers.get(currentAiMessage) + part.content;
+                messageBuffers.set(currentAiMessage, buffer);
+                currentAiMessage.innerHTML = parseContent(buffer);
                 break;
             }
           });
+          scrollToBottom();
         }
-        scrollToBottom();
         break;
 
       case "showTyping":
         typingIndicator.classList.remove("hidden");
+        scrollToBottom();
         break;
 
       case "hideTyping":
@@ -110,7 +181,7 @@
 
       case "showError":
         const errorElement = createMessageElement(
-          `<div class="error-message">${content}</div>`,
+          `<div class="error-message">${message.content}</div>`,
           "error"
         );
         messagesContainer.appendChild(errorElement);
@@ -120,26 +191,26 @@
       case "clearHistory":
         messagesContainer.innerHTML = "";
         allThinkContainers.length = 0;
+        currentAiMessage = null;
         break;
 
       case "startThink":
-        handleThink("", hide);
+        const thinkContainer = createThinkContainer("", message.hide);
+        messagesContainer.appendChild(thinkContainer);
+        allThinkContainers.push(thinkContainer);
+        scrollToBottom();
         break;
 
       case "appendThink":
         if (allThinkContainers.length > 0) {
           const lastThink = allThinkContainers[allThinkContainers.length - 1];
           const contentDiv = lastThink.querySelector(".think-content");
-          let buffer = contentDiv.textContent + content;
-          contentDiv.innerHTML = parseContent(buffer);
-
-          if (!hide) {
+          contentDiv.innerHTML = parseContent(message.content);
+          if (!message.hide) {
             contentDiv.classList.add("visible");
             lastThink.querySelector(".toggle-icon").textContent = "▼";
             lastThink.dataset.visible = "true";
           }
-
-          hljs.highlightAllUnder(contentDiv);
           scrollToBottom();
         }
         break;
@@ -152,11 +223,9 @@
 
       case "appendAnswer":
         if (currentAiMessage) {
-          let buffer = messageBuffers.get(currentAiMessage) || "";
-          buffer += content;
+          const buffer = messageBuffers.get(currentAiMessage) + message.content;
           messageBuffers.set(currentAiMessage, buffer);
           currentAiMessage.innerHTML = parseContent(buffer);
-          hljs.highlightAllUnder(currentAiMessage);
           scrollToBottom();
         }
         break;
@@ -166,8 +235,7 @@
           currentAiMessage = createMessageElement("", "ai");
           messagesContainer.appendChild(currentAiMessage);
         }
-        let buffer = messageBuffers.get(currentAiMessage) || "";
-        buffer += content;
+        const buffer = messageBuffers.get(currentAiMessage) + message.content;
         messageBuffers.set(currentAiMessage, buffer);
         currentAiMessage.innerHTML = parseContent(buffer);
         scrollToBottom();
@@ -175,58 +243,6 @@
     }
   });
 
-  function handleThink(content, hide) {
-    const thinkContainer = document.createElement("div");
-    thinkContainer.className = "think-container";
-    thinkContainer.innerHTML = `
-      <div class="think-toggle">
-        <span class="toggle-icon">▶</span>
-        <span class="toggle-text">Thought Process</span>
-      </div>
-      <div class="think-content">${parseContent(content)}</div>
-    `;
-    messagesContainer.appendChild(thinkContainer);
-    allThinkContainers.push(thinkContainer);
-
-    const toggle = thinkContainer.querySelector(".think-toggle");
-    const contentDiv = thinkContainer.querySelector(".think-content");
-    let isVisible = false;
-
-    toggle.addEventListener("click", () => {
-      isVisible = !isVisible;
-      contentDiv.classList.toggle("visible");
-      toggle.querySelector(".toggle-icon").textContent = isVisible ? "▼" : "▶";
-      thinkContainer.dataset.visible = isVisible.toString();
-    });
-
-    if (!hide) {
-      contentDiv.classList.add("visible");
-      toggle.querySelector(".toggle-icon").textContent = "▼";
-      thinkContainer.dataset.visible = "true";
-    }
-
-    hljs.highlightAllUnder(contentDiv);
-    scrollToBottom();
-  }
-
-  function handleAnswer(content) {
-    currentAiMessage = createMessageElement(parseContent(content), "ai");
-    messagesContainer.appendChild(currentAiMessage);
-    scrollToBottom();
-  }
-
-  function handleRaw(content) {
-    if (!currentAiMessage) {
-      currentAiMessage = createMessageElement("", "ai");
-      messagesContainer.appendChild(currentAiMessage);
-    }
-    let buffer = messageBuffers.get(currentAiMessage) || "";
-    buffer += content;
-    messageBuffers.set(currentAiMessage, buffer);
-    currentAiMessage.innerHTML = parseContent(buffer);
-    scrollToBottom();
-  }
-
-  // Handle initial focus
+  // Initialize
   input.focus();
 })();
