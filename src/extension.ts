@@ -2,9 +2,16 @@ import Ollama from "ollama";
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import { FileHandler } from "./utils/FileHandler";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
+  content: string;
+  structure?: MessageStructure[];
+}
+
+interface MessageStructure {
+  type: "think" | "answer" | "raw";
   content: string;
 }
 
@@ -52,102 +59,81 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
           break;
       }
     });
+
+    this._rebuildChatHistory();
+  }
+
+  private async _rebuildChatHistory() {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.webview.postMessage({ command: "clearHistory" });
+
+    for (const msg of this._chatHistory) {
+      if (msg.role === "assistant" && msg.structure) {
+        this._view.webview.postMessage({
+          command: "addStructuredMessage",
+          content: msg.content,
+          structure: msg.structure,
+        });
+      } else {
+        this._view.webview.postMessage({
+          command: "addMessage",
+          role: msg.role,
+          content: msg.content,
+        });
+      }
+    }
   }
 
   private async _handleFileOperations(response: string) {
-    const config = vscode.workspace.getConfiguration("stella");
-    if (!config.get<boolean>("allowFileOperations", false)) {
-      return;
-    }
+    const fileHandler = new FileHandler();
 
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-      return;
-    }
+    try {
+      // Improved regex patterns for file operations
+      const writeRegex =
+        /<write-file>(.*?)<\/write-file>\s*([\s\S]*?)\s*<\/write-file>/g;
+      const deleteRegex = /<delete-file>(.*?)<\/delete-file>/g;
 
-    const rootPath = workspaceFolders[0].uri.fsPath;
-
-    const readRegex = /<read-file>(.*?)<\/read-file>/gs;
-    let readMatch;
-    while ((readMatch = readRegex.exec(response)) !== null) {
-      const filePath = path.join(rootPath, readMatch[1]);
-      if (this._isSafePath(rootPath, filePath)) {
+      // Process write operations
+      let writeMatch;
+      while ((writeMatch = writeRegex.exec(response)) !== null) {
+        const [_, filePath, content] = writeMatch;
         try {
-          const content = await fs.promises.readFile(filePath, "utf-8");
+          await fileHandler.writeFile(filePath.trim(), content.trim());
           this._chatHistory.push({
             role: "system",
-            content: `FILE CONTENT: ${readMatch[1]}\n\`\`\`\n${content}\n\`\`\``,
+            content: `FILE CREATED: ${filePath}`,
           });
-        } catch (error) {
+        } catch (err: any) {
           this._chatHistory.push({
             role: "system",
-            content: `ERROR READING FILE: ${readMatch[1]} - ${error}`,
+            content: `ERROR WRITING FILE: ${filePath} - ${err.message}`,
           });
         }
       }
-    }
 
-    const writeRegex =
-      /<write-file>(.*?)<\/write-file>([\s\S]*?)<\/write-file>/gs;
-    const deleteRegex = /<delete-file>(.*?)<\/delete-file>/gs;
-
-    const operations = [];
-
-    let writeMatch;
-    while ((writeMatch = writeRegex.exec(response)) !== null) {
-      operations.push({
-        type: "write",
-        path: path.join(rootPath, writeMatch[1]),
-        content: writeMatch[2].trim(),
-      });
-    }
-
-    let deleteMatch;
-    while ((deleteMatch = deleteRegex.exec(response)) !== null) {
-      operations.push({
-        type: "delete",
-        path: path.join(rootPath, deleteMatch[1]),
-      });
-    }
-
-    for (const op of operations) {
-      if (this._isSafePath(rootPath, op.path)) {
-        const approval = await vscode.window.showWarningMessage(
-          `Stella wants to ${op.type} ${path.relative(rootPath, op.path)}`,
-          "Approve",
-          "Reject"
-        );
-
-        if (approval === "Approve") {
-          try {
-            if (op.type === "write") {
-              const content = op.content || "";
-              await fs.promises.mkdir(path.dirname(op.path), {
-                recursive: true,
-              });
-              await fs.promises.writeFile(op.path, content);
-              vscode.window.showInformationMessage(
-                `File written: ${path.relative(rootPath, op.path)}`
-              );
-            } else if (op.type === "delete") {
-              await fs.promises.unlink(op.path);
-              vscode.window.showInformationMessage(
-                `File deleted: ${path.relative(rootPath, op.path)}`
-              );
-            }
-          } catch (error) {
-            vscode.window.showErrorMessage(`Operation failed: ${error}`);
-          }
+      // Process delete operations
+      let deleteMatch;
+      while ((deleteMatch = deleteRegex.exec(response)) !== null) {
+        const filePath = deleteMatch[1].trim();
+        try {
+          await fileHandler.deleteFile(filePath);
+          this._chatHistory.push({
+            role: "system",
+            content: `FILE DELETED: ${filePath}`,
+          });
+        } catch (err: any) {
+          this._chatHistory.push({
+            role: "system",
+            content: `ERROR DELETING FILE: ${filePath} - ${err.message}`,
+          });
         }
       }
+    } catch (err) {
+      console.error("Error handling file operations:", err);
     }
-  }
-
-  private _isSafePath(root: string, target: string): boolean {
-    const relative = path.relative(root, target);
-    return (
-      !!relative && !relative.startsWith("..") && !path.isAbsolute(relative)
-    );
   }
 
   private async _getProjectContext(): Promise<string> {
@@ -165,15 +151,13 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
     const files = await vscode.workspace.findFiles(
       `{${config.include.join(",")}}`,
-      config.exclude.join(",")
+      `{${config.exclude.join(",")}}`
     );
-    const selectedFiles = files.slice(0, config.maxFiles);
 
     let context = "Current Project Structure:\n```\n";
-    for (const file of selectedFiles) {
-      const relativePath = path.relative(rootPath, file.fsPath);
-      context += `${relativePath}\n`;
-    }
+    files.slice(0, config.maxFiles).forEach((file) => {
+      context += `${path.relative(rootPath, file.fsPath)}\n`;
+    });
     context += "```\n";
 
     try {
@@ -182,7 +166,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         "utf-8"
       );
       context += `Package.json Dependencies:\n\`\`\`json\n${packageJson}\n\`\`\`\n`;
-    } catch (error) {
+    } catch {
       context += "No package.json found\n";
     }
 
@@ -211,20 +195,24 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       webviewView.webview.postMessage({ command: "showTyping" });
 
       const systemPrompt = `You are Stella, the AI Coding Partner. Follow these rules:
-                            1. Provide expert-level code assistance with clear explanations
-                            2. Format responses in GitHub Flavored Markdown
-                            3. For complex answers, structure your response as:
-                              <think>
-                              Step-by-step reasoning...
-                              </think>
-                              <answer>
-                              Final answer with code and explanation
-                              </answer>
-                            4. Always wrap code blocks with \`\`\` and language identifier
-                            5. Use these tags for file operations:
-                              <read-file>path</read-file>
-                              <write-file>path</write-file>content</write-file>
-                              <delete-file>path</delete-file>`;
+1. Provide expert-level code assistance with clear explanations
+2. Format responses in GitHub Flavored Markdown
+3. When creating new projects:
+  - Start with core files (package.json, main source files)
+  - Follow language/framework conventions
+  - Include necessary configuration files
+  - Create proper directory structure
+4. For project generation, use these tags first:
+  <project-structure>
+  Recommended file paths:
+  - src/index.js
+  - package.json
+  - README.md
+  </project-structure>
+5. Use these tags for file operations:
+  <read-file>path</read-file>
+  <write-file>path</write-file>content</write-file>
+  <delete-file>path</delete-file>`;
 
       const projectContext = await this._getProjectContext();
       const systemMessage = `${systemPrompt}\n\n${projectContext}`;
@@ -234,6 +222,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       let currentState: "thinking" | "answering" | "none" = "none";
       let thinkBuffer = "";
       let answerBuffer = "";
+      const structure: MessageStructure[] = [];
 
       const stream = await Ollama.chat({
         model,
@@ -244,8 +233,8 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         stream: true,
         options: {
           temperature: 0.5,
-          num_ctx: 4096,
-        } as any,
+          num_ctx: 8192,
+        },
       });
 
       for await (const chunk of stream) {
@@ -280,6 +269,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             const endIndex = buffer.indexOf("</think>");
             if (endIndex !== -1) {
               thinkBuffer += buffer.slice(0, endIndex);
+              structure.push({ type: "think", content: thinkBuffer });
               webviewView.webview.postMessage({
                 command: "appendThink",
                 content: thinkBuffer,
@@ -299,6 +289,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             const endIndex = buffer.indexOf("</answer>");
             if (endIndex !== -1) {
               answerBuffer += buffer.slice(0, endIndex);
+              structure.push({ type: "answer", content: answerBuffer });
               webviewView.webview.postMessage({
                 command: "appendAnswer",
                 content: answerBuffer,
@@ -319,6 +310,7 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (buffer.length > 0 && currentState === "none") {
+          structure.push({ type: "raw", content: buffer });
           webviewView.webview.postMessage({
             command: "appendRaw",
             content: buffer,
@@ -327,7 +319,11 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
         }
       }
 
-      this._chatHistory.push({ role: "assistant", content: fullResponse });
+      this._chatHistory.push({
+        role: "assistant",
+        content: fullResponse,
+        structure,
+      });
       await this._handleFileOperations(fullResponse);
     } catch (err: any) {
       webviewView.webview.postMessage({
@@ -343,19 +339,6 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
 
   private _getWebviewContent(): string {
     const nonce = this._getNonce();
-    const scriptUri = this._view!.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "main.js")
-    );
-    const styleUri = this._view!.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "main.css")
-    );
-    const markedUri = this._view!.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "marked.min.js")
-    );
-    const hljsUri = this._view!.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "highlight.min.js")
-    );
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -366,9 +349,13 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
       this._view!.webview.cspSource
     } 'unsafe-inline'; font-src ${this._view!.webview.cspSource}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="${styleUri}">
-    <script nonce="${nonce}" src="${markedUri}"></script>
-    <script nonce="${nonce}" src="${hljsUri}"></script>
+    <link rel="stylesheet" href="${this._getResourceUri("media/main.css")}">
+    <script nonce="${nonce}" src="${this._getResourceUri(
+      "media/marked.min.js"
+    )}"></script>
+    <script nonce="${nonce}" src="${this._getResourceUri(
+      "media/highlight.min.js"
+    )}"></script>
     <title>Stella AI</title>
 </head>
 <body>
@@ -384,19 +371,39 @@ class StellaViewProvider implements vscode.WebviewViewProvider {
             <button id="sendBtn" title="Send message" aria-label="Send message"></button>
         </div>
     </div>
-    <script nonce="${nonce}" src="${scriptUri}"></script>
+    <script nonce="${nonce}" src="${this._getResourceUri(
+      "media/main.js"
+    )}"></script>
 </body>
 </html>`;
   }
 
-  private _getNonce() {
-    let text = "";
-    const possible =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    for (let i = 0; i < 32; i++) {
-      text += possible.charAt(Math.floor(Math.random() * possible.length));
+  private _getResourceUri(filePath: string): vscode.Uri {
+    return this._view!.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, filePath)
+    );
+  }
+
+  private _getNonce(): string {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async generateProjectScaffold() {
+    try {
+      const config = vscode.workspace.getConfiguration("stella");
+      await config.update("allowFileOperations", true, true);
+
+      const prompt = `Generate a complete project structure for a [DESCRIBE PROJECT] in this empty folder.
+                      Include all necessary configuration files, source files, and documentation.`;
+
+      if (this._view) {
+        await this._handleChatMessage(this._view, prompt);
+      }
+    } catch (err) {
+      console.error("Error generating project scaffold:", err);
     }
-    return text;
   }
 }
 
@@ -412,6 +419,13 @@ export function activate(context: vscode.ExtensionContext) {
       const config = vscode.workspace.getConfiguration("stella");
       const currentValue = config.get<boolean>("hideThinking", true);
       config.update("hideThinking", !currentValue, true);
+    }),
+    vscode.commands.registerCommand("stella-ext.generateProject", async () => {
+      if (!vscode.workspace.workspaceFolders) {
+        vscode.window.showErrorMessage("Open a folder first");
+        return;
+      }
+      await provider.generateProjectScaffold();
     })
   );
 }

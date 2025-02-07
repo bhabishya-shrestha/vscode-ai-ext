@@ -14,7 +14,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:stella-ext.clearHistory",
+    "onCommand:stella-ext.generateProject"
   ],
   "main": "./out/extension.js",
   "contributes": {

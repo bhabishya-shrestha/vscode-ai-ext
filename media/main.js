@@ -6,10 +6,9 @@
   const typingIndicator = document.getElementById("typing-indicator");
 
   let currentAiMessage = null;
-  let currentThinkContainer = null;
   let markedInitialized = false;
   const messageBuffers = new WeakMap();
-  const thinkStates = new WeakMap();
+  const allThinkContainers = [];
 
   function parseContent(content) {
     initializeMarked();
@@ -55,7 +54,6 @@
       input.value = "";
       input.style.height = "44px";
       currentAiMessage = null;
-      currentThinkContainer = null;
     }
   }
 
@@ -74,12 +72,31 @@
   });
 
   window.addEventListener("message", (event) => {
-    const { command, content, role, hide } = event.data;
+    const { command, content, role, hide, structure } = event.data;
 
     switch (command) {
       case "addMessage":
         const element = createMessageElement(parseContent(content), role);
         messagesContainer.appendChild(element);
+        scrollToBottom();
+        break;
+
+      case "addStructuredMessage":
+        if (structure) {
+          structure.forEach((part) => {
+            switch (part.type) {
+              case "think":
+                handleThink(part.content, hide);
+                break;
+              case "answer":
+                handleAnswer(part.content);
+                break;
+              case "raw":
+                handleRaw(part.content);
+                break;
+            }
+          });
+        }
         scrollToBottom();
         break;
 
@@ -102,49 +119,24 @@
 
       case "clearHistory":
         messagesContainer.innerHTML = "";
+        allThinkContainers.length = 0;
         break;
 
       case "startThink":
-        currentThinkContainer = document.createElement("div");
-        currentThinkContainer.className = "think-container";
-        currentThinkContainer.innerHTML = `
-          <div class="think-toggle">
-            <span class="toggle-icon">▶</span>
-            <span class="toggle-text">Thought Process</span>
-          </div>
-          <div class="think-content"></div>
-        `;
-        messagesContainer.appendChild(currentThinkContainer);
-        thinkStates.set(currentThinkContainer, false);
-
-        currentThinkContainer
-          .querySelector(".think-toggle")
-          .addEventListener("click", () => {
-            const content =
-              currentThinkContainer.querySelector(".think-content");
-            const icon = currentThinkContainer.querySelector(".toggle-icon");
-            const isVisible = thinkStates.get(currentThinkContainer);
-
-            content.classList.toggle("visible");
-            icon.textContent = isVisible ? "▶" : "▼";
-            thinkStates.set(currentThinkContainer, !isVisible);
-          });
-
-        scrollToBottom();
+        handleThink("", hide);
         break;
 
       case "appendThink":
-        if (currentThinkContainer) {
-          const contentDiv =
-            currentThinkContainer.querySelector(".think-content");
+        if (allThinkContainers.length > 0) {
+          const lastThink = allThinkContainers[allThinkContainers.length - 1];
+          const contentDiv = lastThink.querySelector(".think-content");
           let buffer = contentDiv.textContent + content;
           contentDiv.innerHTML = parseContent(buffer);
 
           if (!hide) {
             contentDiv.classList.add("visible");
-            currentThinkContainer.querySelector(".toggle-icon").textContent =
-              "▼";
-            thinkStates.set(currentThinkContainer, true);
+            lastThink.querySelector(".toggle-icon").textContent = "▼";
+            lastThink.dataset.visible = "true";
           }
 
           hljs.highlightAllUnder(contentDiv);
@@ -182,6 +174,58 @@
         break;
     }
   });
+
+  function handleThink(content, hide) {
+    const thinkContainer = document.createElement("div");
+    thinkContainer.className = "think-container";
+    thinkContainer.innerHTML = `
+      <div class="think-toggle">
+        <span class="toggle-icon">▶</span>
+        <span class="toggle-text">Thought Process</span>
+      </div>
+      <div class="think-content">${parseContent(content)}</div>
+    `;
+    messagesContainer.appendChild(thinkContainer);
+    allThinkContainers.push(thinkContainer);
+
+    const toggle = thinkContainer.querySelector(".think-toggle");
+    const contentDiv = thinkContainer.querySelector(".think-content");
+    let isVisible = false;
+
+    toggle.addEventListener("click", () => {
+      isVisible = !isVisible;
+      contentDiv.classList.toggle("visible");
+      toggle.querySelector(".toggle-icon").textContent = isVisible ? "▼" : "▶";
+      thinkContainer.dataset.visible = isVisible.toString();
+    });
+
+    if (!hide) {
+      contentDiv.classList.add("visible");
+      toggle.querySelector(".toggle-icon").textContent = "▼";
+      thinkContainer.dataset.visible = "true";
+    }
+
+    hljs.highlightAllUnder(contentDiv);
+    scrollToBottom();
+  }
+
+  function handleAnswer(content) {
+    currentAiMessage = createMessageElement(parseContent(content), "ai");
+    messagesContainer.appendChild(currentAiMessage);
+    scrollToBottom();
+  }
+
+  function handleRaw(content) {
+    if (!currentAiMessage) {
+      currentAiMessage = createMessageElement("", "ai");
+      messagesContainer.appendChild(currentAiMessage);
+    }
+    let buffer = messageBuffers.get(currentAiMessage) || "";
+    buffer += content;
+    messageBuffers.set(currentAiMessage, buffer);
+    currentAiMessage.innerHTML = parseContent(buffer);
+    scrollToBottom();
+  }
 
   // Handle initial focus
   input.focus();
