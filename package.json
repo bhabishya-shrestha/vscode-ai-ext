@@ -53,7 +53,7 @@
       "properties": {
         "stella.model": {
           "type": "string",
-          "default": "deepseek-r1:32b",
+          "default": "deepseek-r1:70b",
           "description": "Default Ollama model to use"
         },
         "stella.ollamaUrl": {
